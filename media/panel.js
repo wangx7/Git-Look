@@ -12,21 +12,56 @@
   const errorBanner = document.getElementById('error-message');
   const commitsTbody = document.getElementById('commits-tbody');
   const graphSvg = document.getElementById('graph-svg');
-  const tableContainer = document.querySelector('.table-container');
+  const tableContainer = document.querySelector('.list-pane');
+
+  // Details Pane Elements
+  const detailsPane = document.querySelector('.details-pane');
+  const resizerBar = document.getElementById('resizer-bar');
+  const detailsPlaceholder = document.querySelector('.details-placeholder');
+  const detailsContent = document.querySelector('.details-content');
+  const detailMergeBadge = document.getElementById('detail-merge-badge');
+  const detailMsg = document.getElementById('detail-msg');
+  const detailStatsRow = document.getElementById('detail-stats-row');
+  const detailFilesTree = document.getElementById('detail-files-tree');
 
   // State
   let commits = [];
   let branches = [];
+  let remoteBranches = [];
   let authors = [];
   let selectedCommitHash = null;
   let expandedRow = null;
   let currentGraphWidth = 120;
+  let cachedLines = [];
+  let cachedCommitNodes = {};
+  const branchColorMap = new Map();
 
   // Pagination State
   let isFetching = false;
   let hasMoreCommits = true;
   let currentPage = 0;
   const pageSize = 150;
+
+  function saveCurrentState() {
+    const filters = {
+      branch: branchSelect.value || undefined,
+      author: authorSelect.value || undefined,
+      since: sinceDate.value || undefined,
+      until: untilDate.value || undefined,
+      query: searchInput.value.trim() || undefined
+    };
+    vscode.setState({
+      commits,
+      branches,
+      remoteBranches,
+      authors,
+      selectedCommitHash,
+      currentPage,
+      hasMoreCommits,
+      filters,
+      detailsWidth: detailsPane.style.width
+    });
+  }
 
   // Loading 防闪烁
   let loadingTimer = null;
@@ -45,18 +80,18 @@
   const laneWidth = 12;
   const paddingLeft = 16;
   const colors = [
-    '#10b981', // emerald
-    '#6366f1', // indigo
-    '#f59e0b', // amber
-    '#3b82f6', // blue
-    '#ec4899', // pink
-    '#8b5cf6', // violet
-    '#14b8a6', // teal
-    '#ef4444', // red
-    '#06b6d4', // cyan
-    '#84cc16', // lime
-    '#f97316', // orange
-    '#a855f7'  // purple
+    '#5cacee', // soft sky blue
+    '#66bb6a', // soft green
+    '#ff7043', // soft coral
+    '#ab47bc', // soft purple
+    '#26a69a', // soft teal
+    '#ffca28', // soft amber
+    '#ec407a', // soft pink
+    '#26c6da', // soft cyan
+    '#7e57c2', // soft violet
+    '#c8db58', // soft lime
+    '#8d6e63', // soft brown
+    '#78909c'  // soft blue-grey
   ];
 
   // 文件扩展名 → codicon class + 颜色 class 映射
@@ -169,8 +204,39 @@
     }
   });
 
-  // 初始加载
-  reloadData();
+  // Restore state if available
+  const previousState = vscode.getState();
+  if (previousState) {
+    commits = previousState.commits || [];
+    branches = previousState.branches || [];
+    remoteBranches = previousState.remoteBranches || [];
+    authors = previousState.authors || [];
+    selectedCommitHash = previousState.selectedCommitHash || null;
+    currentPage = previousState.currentPage || 0;
+    hasMoreCommits = previousState.hasMoreCommits !== undefined ? previousState.hasMoreCommits : true;
+    
+    if (previousState.detailsWidth) {
+      detailsPane.style.width = previousState.detailsWidth;
+    }
+
+    if (previousState.filters) {
+      branchSelect.value = previousState.filters.branch || '';
+      authorSelect.value = previousState.filters.author || '';
+      sinceDate.value = previousState.filters.since || '';
+      untilDate.value = previousState.filters.until || '';
+      searchInput.value = previousState.filters.query || '';
+    }
+
+    updateFilterControls();
+    renderTableAndGraph();
+    
+    if (selectedCommitHash) {
+      vscode.postMessage({ command: 'getCommitDetail', hash: selectedCommitHash });
+    }
+  } else {
+    // 初始加载
+    reloadData();
+  }
 
   // 过滤器监听
   branchSelect.addEventListener('change', reloadData);
@@ -224,13 +290,15 @@
         }
 
         branches = message.branches;
+        remoteBranches = message.remoteBranches || [];
         authors = message.authors;
         
         updateFilterControls();
         renderTableAndGraph();
+        saveCurrentState();
         break;
       case 'commitDetail':
-        renderCommitDetail(message.hash, message.files);
+        renderCommitDetail(message.hash, message.files, message.branches);
         break;
       case 'focusCommit':
         focusAndHighlightCommit(message.hash);
@@ -300,8 +368,18 @@
     const lines = [];         // 连线数据
     let maxLanes = 0;
 
+    // 找出主干提交，强行绑定在 Lane 0 (主轴)
+    const mainTrunk = new Set();
+    const headCommit = commits.find(c => c.decorations && c.decorations.includes('HEAD'));
+    let curr = headCommit ? headCommit.hash : (commits[0] ? commits[0].hash : null);
+    while (curr) {
+      mainTrunk.add(curr);
+      const c = commits.find(x => x.hash === curr);
+      curr = (c && c.parents && c.parents.length > 0) ? c.parents[0] : null;
+    }
+
     // 分支名 -> 颜色映射（用于 badge 上色）
-    const branchColorMap = new Map();
+    branchColorMap.clear();
 
     for (let r = 0; r < commits.length; r++) {
       const c = commits[r];
@@ -312,12 +390,36 @@
       // 找到或分配 lane
       let laneIdx = lanes.indexOf(hash);
       if (laneIdx === -1) {
-        laneIdx = lanes.indexOf(null);
-        if (laneIdx === -1) {
-          laneIdx = lanes.length;
-          lanes.push(hash);
+        if (mainTrunk.has(hash)) {
+          laneIdx = 0;
+          if (lanes.length === 0) {
+            lanes.push(hash);
+          } else {
+            lanes[0] = hash;
+          }
         } else {
-          lanes[laneIdx] = hash;
+          // Search empty slot starting from lane 1 (reserve lane 0 for main trunk)
+          let emptySlot = -1;
+          for (let s = 1; s < lanes.length; s++) {
+            if (lanes[s] === null) {
+              emptySlot = s;
+              break;
+            }
+          }
+          if (emptySlot !== -1) {
+            laneIdx = emptySlot;
+            lanes[laneIdx] = hash;
+          } else {
+            // Allocate new lane
+            if (lanes.length === 0) {
+              lanes.push(null); // Lane 0 reserved
+              lanes.push(hash); // Lane 1
+              laneIdx = 1;
+            } else {
+              laneIdx = lanes.length;
+              lanes.push(hash);
+            }
+          }
         }
       }
 
@@ -347,7 +449,14 @@
           if (p0LaneIdx !== -1) {
             targetLaneIdx = p0LaneIdx;
           } else {
-            lanes[laneIdx] = p0;
+            if (mainTrunk.has(p0)) {
+              if (lanes[0] === null) {
+                lanes[0] = p0;
+              }
+              targetLaneIdx = 0;
+            } else {
+              lanes[laneIdx] = p0;
+            }
           }
 
           lines.push({
@@ -371,20 +480,28 @@
             let pkTargetLaneIdx = pkLaneIdx;
 
             if (pkLaneIdx === -1) {
-              // 不复用已占用的 slot，防重叠
-              let emptySlot = -1;
-              for (let s = 0; s < lanes.length; s++) {
-                if (lanes[s] === null && s !== laneIdx) {
-                  emptySlot = s;
-                  break;
+              if (mainTrunk.has(pk)) {
+                pkTargetLaneIdx = 0;
+                if (lanes[0] === null) {
+                  lanes[0] = pk;
                 }
-              }
-              if (emptySlot === -1) {
-                pkTargetLaneIdx = lanes.length;
-                lanes.push(pk);
               } else {
-                pkTargetLaneIdx = emptySlot;
-                lanes[emptySlot] = pk;
+                // 不复用已占用的 slot，防重叠 (从 lane 1 开始找)
+                let emptySlot = -1;
+                for (let s = 1; s < lanes.length; s++) {
+                  if (lanes[s] === null && s !== laneIdx) {
+                    emptySlot = s;
+                    break;
+                  }
+                }
+                if (emptySlot === -1) {
+                  pkTargetLaneIdx = lanes.length === 0 ? 1 : lanes.length;
+                  while (lanes.length < pkTargetLaneIdx) lanes.push(null);
+                  lanes.push(pk);
+                } else {
+                  pkTargetLaneIdx = emptySlot;
+                  lanes[emptySlot] = pk;
+                }
               }
             }
 
@@ -427,6 +544,9 @@
       maxLanes = Math.max(maxLanes, lanes.length);
     }
 
+    cachedLines = lines;
+    cachedCommitNodes = commitNodes;
+
     // 动态图表宽度
     const computedGraphWidth = paddingLeft + (maxLanes + 1) * laneWidth;
     currentGraphWidth = computedGraphWidth;
@@ -451,24 +571,32 @@
         tr.dataset.hash = c.hash;
         tr.dataset.parents = JSON.stringify(c.parents);
 
+        const node = cachedCommitNodes[c.hash];
+        if (node) {
+          const color = colors[node.lane % colors.length];
+          tr.style.setProperty('--selection-glow-color', color);
+        }
+
         const relTime = getRelativeTime(c.timestamp);
         const absTime = formatDate(c.timestamp);
-
         // 分支 decorations HTML（颜色与 lane 同步）
         let decsHtml = '';
         if (c.decorations && c.decorations.length > 0) {
-          c.decorations.forEach(dec => {
+          const firstDec = c.decorations[0];
+          
+          const makeBadge = (dec) => {
             let badgeClass = 'badge-branch';
             let iconHtml = '<i class="codicon codicon-git-branch"></i>';
             let badgeColor = branchColorMap.get(dec) || colors[0];
             let isHead = false;
+            const isRemote = remoteBranches.includes(dec) || dec.startsWith('origin/');
 
             if (dec.startsWith('tag: ')) {
               badgeClass = 'badge-tag';
               iconHtml = '<i class="codicon codicon-tag"></i>';
               dec = dec.substring(5);
               badgeColor = '#f59e0b';
-            } else if (dec.startsWith('origin/')) {
+            } else if (isRemote) {
               badgeClass = 'badge-remote-branch';
               iconHtml = '<i class="codicon codicon-cloud"></i>';
             } else if (dec === 'HEAD') {
@@ -481,19 +609,31 @@
               ? `background-color: rgba(255,255,255,0.08); color: #fff;`
               : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor};`;
 
-            decsHtml += `<span class="ref-badge ${badgeClass}" style="${style}">${iconHtml}${escapeHtml(dec)}</span>`;
-          });
+            return `<span class="ref-badge ${badgeClass}" style="${style}">${iconHtml}${escapeHtml(dec)}</span>`;
+          };
+
+          decsHtml += makeBadge(firstDec);
+
+          if (c.decorations.length > 1) {
+            decsHtml += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="还有 ${c.decorations.length - 1} 个分支在详情中展示">+${c.decorations.length - 1}</span>`;
+          }
         }
 
         tr.innerHTML = `
           <td class="graph-col" style="width: ${computedGraphWidth}px; min-width: ${computedGraphWidth}px;"></td>
-          <td class="message-col" title="${escapeHtml(c.message)}">
-            ${decsHtml}
-            <span>${escapeHtml(c.message)}</span>
+          <td class="content-col" colspan="4">
+            <div class="row-content">
+              <div class="commit-main">
+                <span class="commit-message" title="${escapeHtml(c.message)}">${escapeHtml(c.message)}</span>
+              </div>
+              <div class="commit-meta">
+                ${decsHtml}
+                <span class="commit-author" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</span>
+                <span class="commit-date" title="${relTime}">${absTime}</span>
+                <span class="hash-copyable" data-full-hash="${c.hash}">${c.hash.substring(0, 7)}</span>
+              </div>
+            </div>
           </td>
-          <td class="author-col" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</td>
-          <td class="date-col"><span class="relative-time" title="${absTime}">${relTime}</span></td>
-          <td class="hash-col"><span class="hash-copyable" data-full-hash="${c.hash}">${c.hash.substring(0, 7)}</span></td>
         `;
 
         // 点击复制 hash
@@ -512,6 +652,27 @@
         });
 
         tr.addEventListener('click', () => handleRowClick(tr, c.hash, c.parents));
+        
+        // GitLens Row Hover Highlighting
+        tr.addEventListener('mouseenter', () => {
+          const node = cachedCommitNodes[c.hash];
+          if (node) {
+            const lane = node.lane % colors.length;
+            graphSvg.setAttribute('class', `hover-active hover-lane-${lane}`);
+          }
+          const circle = graphSvg.querySelector(`.node-${c.hash}`);
+          if (circle) {
+            circle.classList.add('hovered');
+          }
+        });
+        tr.addEventListener('mouseleave', () => {
+          graphSvg.removeAttribute('class');
+          const circle = graphSvg.querySelector(`.node-${c.hash}`);
+          if (circle) {
+            circle.classList.remove('hovered');
+          }
+        });
+
         commitsTbody.appendChild(tr);
       } else {
         const graphCol = tr.querySelector('.graph-col');
@@ -528,27 +689,53 @@
       if (selectedRow) {
         selectedRow.classList.add('selected');
         selectedCommitHash = oldSelectedHash;
+      } else {
+        collapseDetail();
       }
+    } else {
+      collapseDetail();
     }
 
     // SVG 尺寸
     graphSvg.style.width = computedGraphWidth + 'px';
-    graphSvg.style.height = (commits.length * rowHeight) + 'px';
+
+    // 动态绘制 SVG 连线与节点
+    drawSvg();
+  }
+
+  function drawSvg() {
+    graphSvg.innerHTML = '';
+
+    if (commits.length === 0) {
+      graphSvg.style.height = '0px';
+      return;
+    }
+
+    // Since the table is static now (no detail rows inline), height is always static
+    const totalHeight = commits.length * rowHeight;
+    graphSvg.style.height = totalHeight + 'px';
+
+    // Helper to get Y coordinate for any row index (float or int)
+    function getYCoordinate(rowIndex) {
+      return rowIndex * rowHeight + rowHeight / 2;
+    }
 
     // ─── 3. 渲染 SVG 连线 ─────────
-
-    lines.forEach(line => {
+    cachedLines.forEach(line => {
       const x1 = paddingLeft + line.fromLane * laneWidth;
-      const y1 = line.fromRow * rowHeight + rowHeight / 2;
+      const y1 = getYCoordinate(line.fromRow);
       const x2 = paddingLeft + line.toLane * laneWidth;
-      const y2 = line.toRow * rowHeight + rowHeight / 2;
+      const y2 = getYCoordinate(line.toRow);
       const color = colors[line.colorIdx % colors.length];
+      const laneClass = `lane-${line.colorIdx % colors.length}`;
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('class', laneClass);
       
       if (line.fromLane === line.toLane) {
         if (line.fade) {
-          path.setAttribute('d', `M ${x1} ${y1} L ${x1} ${y1 + rowHeight / 2}`);
+          const fadeLen = 12;
+          path.setAttribute('d', `M ${x1} ${y1} L ${x1} ${y1 + fadeLen}`);
           path.setAttribute('stroke-dasharray', '2,2');
           path.setAttribute('opacity', '0.4');
         } else {
@@ -556,54 +743,74 @@
         }
       } else {
         if (line.fade) {
-          const controlY = y1 + rowHeight / 4;
-          const targetY = y1 + rowHeight / 2;
-          path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${controlY}, ${x2} ${controlY}, ${x2} ${targetY}`);
+          const fadeLen = 12;
+          const controlY1 = y1 + 4;
+          const controlY2 = y1 + fadeLen - 4;
+          path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${controlY1}, ${x2} ${controlY2}, ${x2} ${y1 + fadeLen}`);
           path.setAttribute('stroke-dasharray', '2,2');
           path.setAttribute('opacity', '0.4');
         } else {
-          const controlY = y1 + rowHeight / 2;
-          path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${controlY}, ${x2} ${(y2 - rowHeight / 2)}, ${x2} ${y2}`);
+          const cpOffset = 8; // Tighter, metro-style transit curves (aligned with GitLens)
+          const controlY1 = y1 + cpOffset;
+          const controlY2 = y2 - cpOffset;
+          path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${controlY1}, ${x2} ${controlY2}, ${x2} ${y2}`);
         }
       }
       
       path.setAttribute('stroke', color);
-      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('stroke-width', '1.8');
       path.setAttribute('fill', 'none');
+
+      // GitLens Hover events
+      path.addEventListener('mouseover', () => {
+        const lane = line.colorIdx % colors.length;
+        graphSvg.setAttribute('class', `hover-active hover-lane-${lane}`);
+      });
+      path.addEventListener('mouseout', () => {
+        graphSvg.removeAttribute('class');
+      });
+
       graphSvg.appendChild(path);
     });
 
     // ─── 4. 渲染 SVG 节点 ─────────
-
     commits.forEach((c, r) => {
-      const node = commitNodes[c.hash];
+      const node = cachedCommitNodes[c.hash];
       if (!node) return;
       const x = paddingLeft + node.lane * laneWidth;
-      const y = r * rowHeight + rowHeight / 2;
+      const y = getYCoordinate(r);
       const color = colors[node.lane % colors.length];
+      const laneClass = `lane-${node.lane % colors.length}`;
 
+      // Render all nodes as circles (matching VS Code native Git Graph style)
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('class', `${laneClass} node-${c.hash}`);
+      circle.setAttribute('cx', x);
+      circle.setAttribute('cy', y);
+      
+      // Merge commits are rendered as hollow circles (ring nodes)
       if (node.isMerge) {
-        // 合并节点：菱形标志
-        const size = 4;
-        const diamond = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-        diamond.setAttribute('points',
-          `${x},${y - size} ${x + size},${y} ${x},${y + size} ${x - size},${y}`
-        );
-        diamond.setAttribute('fill', color);
-        diamond.setAttribute('stroke', 'var(--bg-color)');
-        diamond.setAttribute('stroke-width', '1.5');
-        graphSvg.appendChild(diamond);
+        circle.setAttribute('r', '4.5');
+        circle.setAttribute('fill', 'var(--bg-color)');
+        circle.setAttribute('stroke', color);
+        circle.setAttribute('stroke-width', '2');
       } else {
-        // 普通节点：圆形
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', x);
-        circle.setAttribute('cy', y);
-        circle.setAttribute('r', '3');
+        circle.setAttribute('r', '4');
         circle.setAttribute('fill', color);
         circle.setAttribute('stroke', 'var(--bg-color)');
-        circle.setAttribute('stroke-width', '1.5');
-        graphSvg.appendChild(circle);
+        circle.setAttribute('stroke-width', '2');
       }
+
+      // GitLens Hover events
+      circle.addEventListener('mouseover', () => {
+        const lane = node.lane % colors.length;
+        graphSvg.setAttribute('class', `hover-active hover-lane-${lane}`);
+      });
+      circle.addEventListener('mouseout', () => {
+        graphSvg.removeAttribute('class');
+      });
+
+      graphSvg.appendChild(circle);
     });
   }
 
@@ -618,45 +825,86 @@
     collapseDetail();
 
     selectedCommitHash = hash;
+    saveCurrentState();
     row.classList.add('selected');
 
-    const detailTr = document.createElement('tr');
-    detailTr.className = 'detail-row';
-    
-    const graphTd = document.createElement('td');
-    graphTd.className = 'graph-col';
-    graphTd.style.width = currentGraphWidth + 'px';
-    graphTd.style.minWidth = currentGraphWidth + 'px';
-    detailTr.appendChild(graphTd);
+    const commit = commits.find(c => c.hash === hash);
+    if (!commit) return;
 
-    const td = document.createElement('td');
-    td.colSpan = 4;
-    td.innerHTML = `
-      <div class="detail-container">
-        <div style="display: flex; align-items: center; gap: 8px; padding: 4px 0;">
-          <div class="spinner" style="width:14px; height:14px; border-width: 2px;"></div>
-          <span style="opacity: 0.5; font-size: 11px;">获取文件列表...</span>
-        </div>
+    detailsPane.classList.remove('empty');
+    detailsPlaceholder.classList.add('hidden');
+    detailsContent.classList.remove('hidden');
+
+    // Render all branch badges in detail panel
+    const branchesContainer = document.getElementById('detail-branches-container');
+    if (branchesContainer) {
+      branchesContainer.innerHTML = '';
+      if (commit.decorations && commit.decorations.length > 0) {
+        commit.decorations.forEach(dec => {
+          let badgeClass = 'badge-branch';
+          let iconHtml = '<i class="codicon codicon-git-branch"></i>';
+          let badgeColor = branchColorMap.get(dec) || colors[0];
+          let isHead = false;
+          const isRemote = remoteBranches.includes(dec) || dec.startsWith('origin/');
+
+          if (dec.startsWith('tag: ')) {
+            badgeClass = 'badge-tag';
+            iconHtml = '<i class="codicon codicon-tag"></i>';
+            dec = dec.substring(5);
+            badgeColor = '#f59e0b';
+          } else if (isRemote) {
+            badgeClass = 'badge-remote-branch';
+            iconHtml = '<i class="codicon codicon-cloud"></i>';
+          } else if (dec === 'HEAD') {
+            badgeClass = 'badge-head';
+            iconHtml = '<i class="codicon codicon-circle-filled"></i>';
+            isHead = true;
+          }
+
+          const style = isHead
+            ? `background-color: rgba(255,255,255,0.08); color: #fff;`
+            : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor};`;
+
+          const span = document.createElement('span');
+          span.className = `ref-badge ${badgeClass}`;
+          span.style.cssText = style;
+          span.innerHTML = `${iconHtml}${escapeHtml(dec)}`;
+          branchesContainer.appendChild(span);
+        });
+      }
+    }
+
+    if (commit.parents && commit.parents.length >= 2) {
+      detailMergeBadge.classList.remove('hidden');
+    } else {
+      detailMergeBadge.classList.add('hidden');
+    }
+
+    detailMsg.textContent = commit.message;
+
+    detailStatsRow.innerHTML = '';
+    detailFilesTree.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 10px;">
+        <div class="spinner" style="width:14px; height:14px; border-width: 2px;"></div>
+        <span style="opacity: 0.5; font-size: 11px;">获取文件列表...</span>
       </div>
     `;
-    detailTr.appendChild(td);
-    
-    row.parentNode.insertBefore(detailTr, row.nextSibling);
-    expandedRow = detailTr;
 
     vscode.postMessage({ command: 'getCommitDetail', hash });
   }
 
   function collapseDetail() {
-    if (expandedRow) {
-      expandedRow.parentNode.removeChild(expandedRow);
-      expandedRow = null;
-    }
     const previouslySelected = commitsTbody.querySelector('tr.commit-row.selected');
     if (previouslySelected) {
       previouslySelected.classList.remove('selected');
     }
     selectedCommitHash = null;
+    saveCurrentState();
+
+    detailsPane.classList.add('empty');
+    detailsPlaceholder.classList.remove('hidden');
+    detailsContent.classList.add('hidden');
+    detailMergeBadge.classList.add('hidden');
   }
 
   // ── 文件树构建 + 路径压缩 ────────────────────────
@@ -742,6 +990,9 @@
           <div class="tree-node file-node" style="padding-left: ${indent}px;" data-path="${escapeHtml(child.path)}" data-hash="${hash}" data-parent-hash="${parentHash}">
             <i class="codicon ${iconInfo.icon} file-icon ${iconInfo.color}"></i>
             <span class="file-name">${escapeHtml(child._name)}</span>
+            <span class="file-actions">
+              <i class="codicon codicon-go-to-file action-btn" title="转到当前文件 (Go to Current File)"></i>
+            </span>
             <span class="file-status-badge ${statusClass}">${statusLabel}</span>
           </div>
         `;
@@ -770,46 +1021,116 @@
     return html;
   }
 
-  function renderCommitDetail(hash, files) {
-    if (selectedCommitHash !== hash || !expandedRow) return;
+  function renderCommitDetail(hash, files, branches) {
+    if (selectedCommitHash !== hash) return;
 
-    const container = expandedRow.querySelector('.detail-container');
-    
+    const row = commitsTbody.querySelector(`tr.commit-row[data-hash="${hash}"]`);
+    if (!row) return;
+    const parents = JSON.parse(row.dataset.parents);
+    const parentHash = parents[0] || '';
+
+    // Render branch badges in detail panel
+    const branchesContainer = document.getElementById('detail-branches-container');
+    if (branchesContainer) {
+      branchesContainer.innerHTML = '';
+      const commit = commits.find(c => c.hash === hash);
+      const allRefs = new Set();
+      if (commit && commit.decorations) {
+        commit.decorations.forEach(dec => allRefs.add(dec));
+      }
+      if (branches) {
+        branches.forEach(b => allRefs.add(b));
+      }
+
+      if (allRefs.size > 0) {
+        allRefs.forEach(dec => {
+          let badgeClass = 'badge-branch';
+          let iconHtml = '<i class="codicon codicon-git-branch"></i>';
+          let badgeColor = branchColorMap.get(dec) || colors[0];
+          let isHead = false;
+          const isRemote = remoteBranches.includes(dec) || dec.startsWith('origin/');
+
+          if (dec.startsWith('tag: ')) {
+            badgeClass = 'badge-tag';
+            iconHtml = '<i class="codicon codicon-tag"></i>';
+            dec = dec.substring(5);
+            badgeColor = '#f59e0b';
+          } else if (isRemote) {
+            badgeClass = 'badge-remote-branch';
+            iconHtml = '<i class="codicon codicon-cloud"></i>';
+          } else if (dec === 'HEAD') {
+            badgeClass = 'badge-head';
+            iconHtml = '<i class="codicon codicon-circle-filled"></i>';
+            isHead = true;
+          }
+
+          const style = isHead
+            ? `background-color: rgba(255,255,255,0.08); color: #fff;`
+            : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor};`;
+
+          const span = document.createElement('span');
+          span.className = `ref-badge ${badgeClass}`;
+          span.style.cssText = style;
+          span.innerHTML = `${iconHtml}${escapeHtml(dec)}`;
+          branchesContainer.appendChild(span);
+        });
+      }
+    }
+
     if (files.length === 0) {
-      container.innerHTML = '<div style="opacity: 0.5; text-align: center; padding: 8px;">无文件变动</div>';
+      detailStatsRow.innerHTML = '';
+      detailFilesTree.innerHTML = '<div style="opacity: 0.5; text-align: center; padding: 8px;">无文件变动</div>';
       return;
     }
 
-    const parents = JSON.parse(commitsTbody.querySelector(`tr.commit-row[data-hash="${hash}"]`).dataset.parents);
-    const parentHash = parents[0] || '';
-
     // 文件变动统计
-    const stats = { A: 0, M: 0, D: 0, R: 0 };
-    files.forEach(f => { stats[f.status] = (stats[f.status] || 0) + 1; });
+    let addedLines = 0;
+    let deletedLines = 0;
+    let filesChanged = files.length;
+    
+    files.forEach(f => { 
+      if (f.additions) addedLines += parseInt(f.additions, 10) || 0;
+      if (f.deletions) deletedLines += parseInt(f.deletions, 10) || 0;
+    });
 
-    let statsHtml = '<div class="detail-stats">';
-    if (stats.A) statsHtml += `<span class="stat-add">+${stats.A} 新增</span>`;
-    if (stats.M) statsHtml += `<span class="stat-modify">~${stats.M} 修改</span>`;
-    if (stats.D) statsHtml += `<span class="stat-delete">-${stats.D} 删除</span>`;
-    if (stats.R) statsHtml += `<span class="stat-rename">↻${stats.R} 重命名</span>`;
+    let statsHtml = '<div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 4px;">';
+    statsHtml += '<div class="detail-stats" style="margin-left: 0; gap: 12px; font-size: 11px; display: flex; align-items: center;">';
+    statsHtml += `<span><strong>${filesChanged}</strong> 个文件改变</span>`;
+    if (addedLines > 0) statsHtml += `<span class="stat-add"><strong>+${addedLines}</strong> 行插入</span>`;
+    if (deletedLines > 0) statsHtml += `<span class="stat-delete"><strong>-${deletedLines}</strong> 行删除</span>`;
     statsHtml += '</div>';
+    statsHtml += `
+      <button class="btn btn-secondary open-all-changes-btn" style="font-size: 11px; padding: 2px 6px; display: flex; align-items: center; gap: 4px;" title="打开当前提交的所有文件更改对比 (Multi Diff)">
+        <i class="codicon codicon-diff"></i>
+        <span>打开所有更改</span>
+      </button>
+    `;
+    statsHtml += '</div>';
+
+    detailStatsRow.innerHTML = statsHtml;
+
+    const commit = commits.find(c => c.hash === hash);
+    const commitMessage = commit ? commit.message : '';
+    const openAllBtn = detailStatsRow.querySelector('.open-all-changes-btn');
+    if (openAllBtn) {
+      openAllBtn.addEventListener('click', () => {
+        vscode.postMessage({
+          command: 'openAllDiffs',
+          hash: hash,
+          files: files,
+          parentHash: parentHash,
+          message: commitMessage
+        });
+      });
+    }
 
     const fileTree = buildFileTree(files);
     const treeHTML = renderFileTreeHTML(fileTree, 0, hash, parentHash);
 
-    container.innerHTML = `
-      <div class="detail-header">
-        <i class="codicon codicon-files"></i>
-        <span>改动文件 (${files.length})</span>
-        ${statsHtml}
-      </div>
-      <div class="file-list">
-        ${treeHTML}
-      </div>
-    `;
+    detailFilesTree.innerHTML = treeHTML;
 
     // 点击文件打开 diff
-    container.querySelectorAll('.file-node').forEach(el => {
+    detailFilesTree.querySelectorAll('.file-node').forEach(el => {
       el.addEventListener('click', () => {
         vscode.postMessage({
           command: 'openDiff',
@@ -818,10 +1139,23 @@
           parentHash: el.dataset.parentHash
         });
       });
+
+      // 转到当前文件 (openWorkspaceFile)
+      const actionBtn = el.querySelector('.action-btn');
+      if (actionBtn) {
+        actionBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); // 阻止触发 openDiff
+          vscode.postMessage({
+            command: 'openWorkspaceFile',
+            file: el.dataset.path,
+            hash: el.dataset.hash
+          });
+        });
+      }
     });
 
     // 文件夹折叠/展开
-    container.querySelectorAll('.folder-node').forEach(el => {
+    detailFilesTree.querySelectorAll('.folder-node').forEach(el => {
       el.addEventListener('click', () => {
         const children = el.nextElementSibling;
         const chevron = el.querySelector('.tree-chevron');
@@ -892,4 +1226,62 @@
     const b = parseInt(hex.slice(5, 7), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
+  function getAvatarColor(name) {
+    if (!name) return colors[0];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const colorIndex = Math.abs(hash) % colors.length;
+    return colors[colorIndex];
+  }
+
+  function getInitials(name) {
+    if (!name) return '';
+    name = name.trim();
+    const isChinese = /[\u4e00-\u9fa5]/.test(name);
+    if (isChinese) {
+      return name.length > 2 ? name.substring(name.length - 2) : name;
+    }
+    const parts = name.split(/\s+/);
+    if (parts.length > 1) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  }
+
+  // ── 左右分栏拖拽事件 ────────────────────────
+  let isDragging = false;
+
+  resizerBar.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    resizerBar.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+
+    const containerWidth = document.querySelector('.main-layout').clientWidth;
+    const detailsWidth = containerWidth - e.clientX;
+    
+    const minWidth = 280;
+    const maxWidth = containerWidth * 0.6;
+    
+    let finalWidth = Math.max(minWidth, Math.min(maxWidth, detailsWidth));
+    detailsPane.style.width = finalWidth + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      resizerBar.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      saveCurrentState();
+    }
+  });
+
+  window.addEventListener('resize', drawSvg);
 })();

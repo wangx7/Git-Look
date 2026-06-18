@@ -349,14 +349,17 @@ body {
   color: var(--text-link);
 }
 
-/* ========== 卡片内容 ========== */
 .card-body {
   border-top: 1px solid var(--border-color);
-  display: none;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out;
 }
 
 .expanded .card-body {
-  display: block;
+  max-height: 800px;
+  opacity: 1;
 }
 
 /* ========== Diff 比较视图样式 ========== */
@@ -435,4 +438,42 @@ body {
 }
 .line-empty .line-num {
   opacity: 0.1;
+}
+
+/* ========== Code Syntax Highlighting Tokens ========== */
+.token-comment {
+  color: var(--vscode-editorCodeLens-foreground, #6a9955);
+  font-style: italic;
+}
+.token-string {
+  color: #ce9178; /* VS Code Default String Orange */
+}
+.token-keyword {
+  color: #569cd6; /* VS Code Default Keyword Blue */
+  font-weight: 600;
+}
+.token-number {
+  color: #b5cea8; /* VS Code Default Number Light Green */
+}
+.token-type {
+  color: #4ec9b0; /* VS Code Default Type Teal */
+}
+.token-function {
+  color: #dcdcaa; /* VS Code Default Function Yellow */
+}
+
+/* ========== Word-level Diff Highlighting ========== */
+.word-diff-deleted {
+  background-color: rgba(244, 67, 54, 0.45);
+  border-radius: 2px;
+  padding: 0 1px;
+  box-shadow: 0 0 1px rgba(244, 67, 54, 0.6);
+  text-decoration: line-through;
+}
+
+.word-diff-added {
+  background-color: rgba(76, 175, 80, 0.45);
+  border-radius: 2px;
+  padding: 0 1px;
+  box-shadow: 0 0 1px rgba(76, 175, 80, 0.6);
 }

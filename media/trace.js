@@ -156,6 +156,81 @@
     summaryEl.textContent = `共 ${commits.length} 次修改 · 最初创建于 ${formatDate(commits[commits.length - 1].timestamp)} · 最近修改于 ${formatDate(commits[0].timestamp)}`;
   }
 
+  // tokenRegex matches standard patterns
+  const tokenRegex = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`)|(\b(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|class|interface|struct|impl|pub|fn|def|elif|try|catch|import|export|await|async|new|this|type|from|in|is|lambda|and|or|not|public|private|protected|static|void|int|double|float|char|bool|boolean|string)\b)|(\b\d+(?:\.\d+)?\b)|(\b[A-Z]\w*\b)|(\b\w+(?=\s*\())/g;
+
+  function highlightCode(text) {
+    if (!text) return '';
+    tokenRegex.lastIndex = 0; // Reset regex state
+    let lastIndex = 0;
+    let html = '';
+    let match;
+    
+    while ((match = tokenRegex.exec(text)) !== null) {
+      html += escapeHtml(text.substring(lastIndex, match.index));
+      
+      const [full, comment, string, keyword, number, type, func] = match;
+      if (comment) {
+        html += `<span class="token-comment">${escapeHtml(full)}</span>`;
+      } else if (string) {
+        html += `<span class="token-string">${escapeHtml(full)}</span>`;
+      } else if (keyword) {
+        html += `<span class="token-keyword">${escapeHtml(full)}</span>`;
+      } else if (number) {
+        html += `<span class="token-number">${escapeHtml(full)}</span>`;
+      } else if (type) {
+        html += `<span class="token-type">${escapeHtml(full)}</span>`;
+      } else if (func) {
+        html += `<span class="token-function">${escapeHtml(full)}</span>`;
+      } else {
+        html += escapeHtml(full);
+      }
+      
+      lastIndex = tokenRegex.lastIndex;
+    }
+    
+    html += escapeHtml(text.substring(lastIndex));
+    return html;
+  }
+
+  function diffWords(str1, str2) {
+    const words1 = str1.split(/(\s+|\b)/).filter(Boolean);
+    const words2 = str2.split(/(\s+|\b)/).filter(Boolean);
+
+    const dp = Array(words1.length + 1).fill(null).map(() => Array(words2.length + 1).fill(0));
+    for (let i = 1; i <= words1.length; i++) {
+      for (let j = 1; j <= words2.length; j++) {
+        if (words1[i - 1] === words2[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+
+    let i = words1.length;
+    let j = words2.length;
+    const out1 = [];
+    const out2 = [];
+
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && words1[i - 1] === words2[j - 1]) {
+        out1.unshift({ type: 'common', text: words1[i - 1] });
+        out2.unshift({ type: 'common', text: words2[j - 1] });
+        i--;
+        j--;
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        out2.unshift({ type: 'added', text: words2[j - 1] });
+        j--;
+      } else {
+        out1.unshift({ type: 'deleted', text: words1[i - 1] });
+        i--;
+      }
+    }
+
+    return { leftWords: out1, rightWords: out2 };
+  }
+
   function renderDiff(container, diffLines) {
     if (diffLines.length === 0) {
       container.innerHTML = `<div style="padding: 12px; opacity: 0.5; text-align: center;">无代码变动（可能是空白字符变化）</div>`;
@@ -173,9 +248,25 @@
     left.forEach(line => {
       const lineDiv = document.createElement('div');
       lineDiv.className = `diff-line ${line.type === 'deleted' ? 'line-deleted' : (line.type === 'empty' ? 'line-empty' : '')}`;
+      
+      let htmlContent = '';
+      if (line.type === 'empty') {
+        htmlContent = '';
+      } else if (line.words) {
+        line.words.forEach(w => {
+          if (w.type === 'common') {
+            htmlContent += highlightCode(w.text);
+          } else if (w.type === 'deleted') {
+            htmlContent += `<span class="word-diff-deleted">${escapeHtml(w.text)}</span>`;
+          }
+        });
+      } else {
+        htmlContent = highlightCode(line.text);
+      }
+
       lineDiv.innerHTML = `
         <div class="line-num">${line.lineNum}</div>
-        <div class="line-text">${escapeHtml(line.text)}</div>
+        <div class="line-text">${htmlContent}</div>
       `;
       leftPane.appendChild(lineDiv);
     });
@@ -186,9 +277,25 @@
     right.forEach(line => {
       const lineDiv = document.createElement('div');
       lineDiv.className = `diff-line ${line.type === 'added' ? 'line-added' : (line.type === 'empty' ? 'line-empty' : '')}`;
+      
+      let htmlContent = '';
+      if (line.type === 'empty') {
+        htmlContent = '';
+      } else if (line.words) {
+        line.words.forEach(w => {
+          if (w.type === 'common') {
+            htmlContent += highlightCode(w.text);
+          } else if (w.type === 'added') {
+            htmlContent += `<span class="word-diff-added">${escapeHtml(w.text)}</span>`;
+          }
+        });
+      } else {
+        htmlContent = highlightCode(line.text);
+      }
+
       lineDiv.innerHTML = `
         <div class="line-num">${line.lineNum}</div>
-        <div class="line-text">${escapeHtml(line.text)}</div>
+        <div class="line-text">${htmlContent}</div>
       `;
       rightPane.appendChild(lineDiv);
     });
@@ -239,17 +346,24 @@
       if (delBlock.length > 0 || addBlock.length > 0) {
         const maxLen = Math.max(delBlock.length, addBlock.length);
         for (let k = 0; k < maxLen; k++) {
+          let leftLine = null;
+          let rightLine = null;
+
           if (k < delBlock.length) {
-            leftSide.push({ lineNum: leftLineNum++, text: delBlock[k].text, type: 'deleted' });
-          } else {
-            leftSide.push({ lineNum: '', text: '', type: 'empty' });
+            leftLine = { lineNum: leftLineNum++, text: delBlock[k].text, type: 'deleted' };
+          }
+          if (k < addBlock.length) {
+            rightLine = { lineNum: rightLineNum++, text: addBlock[k].text, type: 'added' };
           }
 
-          if (k < addBlock.length) {
-            rightSide.push({ lineNum: rightLineNum++, text: addBlock[k].text, type: 'added' });
-          } else {
-            rightSide.push({ lineNum: '', text: '', type: 'empty' });
+          if (leftLine && rightLine) {
+            const { leftWords, rightWords } = diffWords(leftLine.text, rightLine.text);
+            leftLine.words = leftWords;
+            rightLine.words = rightWords;
           }
+
+          leftSide.push(leftLine || { lineNum: '', text: '', type: 'empty' });
+          rightSide.push(rightLine || { lineNum: '', text: '', type: 'empty' });
         }
       }
 

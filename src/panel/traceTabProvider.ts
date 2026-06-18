@@ -41,9 +41,12 @@ export class TraceTabProvider {
 
     this.activePanels.set(panelId, panel);
 
+    const abortController = new AbortController();
+
     // Clean up on dispose
     panel.onDidDispose(() => {
       this.activePanels.delete(panelId);
+      abortController.abort();
     });
 
     // Load HTML
@@ -55,16 +58,25 @@ export class TraceTabProvider {
     const codiconUri = panel.webview.asWebviewUri(
       vscode.Uri.joinPath(vscode.Uri.file(vscode.env.appRoot), 'out', 'media', 'codicon.css')
     );
+    const prismJsUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'prism.js'));
+    const prismCssUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'prism.css'));
 
-    html = html.replace('${scriptUri}', scriptUri.toString());
-    html = html.replace('${styleUri}', styleUri.toString());
-    html = html.replace('${codiconUri}', codiconUri.toString());
+    html = html.replace(/\${scriptUri}/g, scriptUri.toString());
+    html = html.replace(/\${styleUri}/g, styleUri.toString());
+    html = html.replace(/\${codiconUri}/g, codiconUri.toString());
+    html = html.replace(/\${prismJs}/g, prismJsUri.toString());
+    html = html.replace(/\${prismCss}/g, prismCssUri.toString());
+    html = html.replace(/\${cspSource}/g, panel.webview.cspSource);
     panel.webview.html = html;
 
     // Fetch tracing data
     try {
-      const commits = await traceLineHistory(cwd, filePath, startLine, endLine);
+      const commits = await traceLineHistory(cwd, filePath, startLine, endLine, abortController.signal);
       
+      if (abortController.signal.aborted) {
+        return;
+      }
+
       // Send data to Webview
       panel.webview.postMessage({
         type: 'traceData',
@@ -74,6 +86,9 @@ export class TraceTabProvider {
         commits
       });
     } catch (err: any) {
+      if (abortController.signal.aborted) {
+        return;
+      }
       panel.webview.postMessage({
         type: 'error',
         error: err.message || '追踪代码历史失败'

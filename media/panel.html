@@ -3,72 +3,101 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource}; font-src ${cspSource};">
   <link rel="stylesheet" href="${codiconUri}">
   <link rel="stylesheet" href="${styleUri}">
   <title>Git Graph</title>
 </head>
 <body>
   <div class="container">
-    <!-- 过滤工具栏 -->
-    <div class="filter-bar">
-      <div class="filter-group">
-        <label for="branch-select"><i class="codicon codicon-git-branch"></i></label>
-        <select id="branch-select">
-          <option value="">所有分支</option>
-        </select>
-      </div>
-
-      <div class="filter-group">
-        <label for="author-select"><i class="codicon codicon-person"></i></label>
-        <select id="author-select">
-          <option value="">所有作者</option>
-        </select>
-      </div>
-
-      <div class="filter-group">
-        <label for="since-date"><i class="codicon codicon-calendar"></i></label>
-        <input type="date" id="since-date" title="起始日期">
-      </div>
-
-      <div class="filter-group">
-        <label for="until-date">~</label>
-        <input type="date" id="until-date" title="截止日期">
-      </div>
-
-      <div class="filter-group search-group">
-        <input type="text" id="search-input" placeholder="搜索提交消息或哈希...">
-      </div>
-
-      <button id="reset-btn" class="btn btn-secondary" title="重置所有过滤条件">
-        <i class="codicon codicon-clear-all"></i>
-      </button>
-    </div>
-
-    <!-- 错误提示 -->
-    <div id="error-message" class="error-banner hidden"></div>
-
-    <!-- 主展示区 -->
-    <div class="table-container">
+    <!-- 主展示区 (Flex Split Layout) -->
+    <div class="main-layout">
+      <!-- Loading Overlay -->
       <div id="loading" class="loading-overlay hidden">
         <div class="spinner"></div>
       </div>
 
-      <div class="canvas-wrapper">
-        <svg id="graph-svg"></svg>
-        <table id="commits-table">
-          <thead>
-            <tr>
-              <th class="graph-col">图表</th>
-              <th class="message-col">提交消息</th>
-              <th class="author-col">作者</th>
-              <th class="date-col">日期</th>
-              <th class="hash-col">哈希</th>
-            </tr>
-          </thead>
-          <tbody id="commits-tbody">
-            <!-- 提交行将动态插入此处 -->
-          </tbody>
-        </table>
+      <!-- Left Column: Filter + List -->
+      <div class="left-pane">
+        <!-- 过滤工具栏 -->
+        <div class="filter-bar">
+          <div class="filter-group">
+            <label for="branch-select"><i class="codicon codicon-git-branch"></i></label>
+            <select id="branch-select">
+              <option value="">所有分支</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label for="author-select"><i class="codicon codicon-person"></i></label>
+            <select id="author-select">
+              <option value="">所有作者</option>
+            </select>
+          </div>
+
+          <div class="filter-group">
+            <label for="since-date"><i class="codicon codicon-calendar"></i></label>
+            <input type="date" id="since-date" title="起始日期">
+          </div>
+
+          <div class="filter-group">
+            <label for="until-date">~</label>
+            <input type="date" id="until-date" title="截止日期">
+          </div>
+
+          <div class="filter-group search-group">
+            <input type="text" id="search-input" placeholder="搜索提交消息或哈希...">
+          </div>
+
+          <button id="reset-btn" class="btn btn-secondary" title="重置所有过滤条件">
+            <i class="codicon codicon-clear-all"></i>
+          </button>
+        </div>
+
+        <!-- 错误提示 -->
+        <div id="error-message" class="error-banner hidden"></div>
+
+        <!-- Left Pane: Commit History List -->
+        <div class="list-pane">
+          <div class="canvas-wrapper">
+            <svg id="graph-svg"></svg>
+            <table id="commits-table">
+              <tbody id="commits-tbody">
+                <!-- 提交行将动态插入此处 -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resizer handle -->
+      <div id="resizer-bar" class="resizer-bar"></div>
+
+      <!-- Right Pane: Commit Details (IntelliJ Style) -->
+      <div class="details-pane empty">
+        <div class="details-placeholder">
+          <i class="codicon codicon-git-commit"></i>
+          <span>选择一次提交查看详细信息</span>
+        </div>
+        <div class="details-content hidden">
+          <div class="details-header-section">
+            <div class="details-commit-title">
+              <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                <span id="detail-merge-badge" class="ref-badge badge-merge hidden">合并</span>
+              </div>
+              <div id="detail-branches-container" style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;"></div>
+              <h2 id="detail-msg" style="margin-top: 6px;"></h2>
+            </div>
+            <div class="details-stats-row" id="detail-stats-row">
+              <!-- Stats will be populated here -->
+            </div>
+          </div>
+          <div class="details-files-section">
+            <div id="detail-files-tree" class="file-list">
+              <!-- 文件树 -->
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

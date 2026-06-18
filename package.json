@@ -7,6 +7,9 @@
   "engines": {
     "vscode": "^1.75.0"
   },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "categories": [
     "SCM Providers",
     "Visualization"
@@ -17,6 +20,11 @@
       {
         "command": "git-look.traceOrigin",
         "title": "Git Look: 追溯代码源头 (Trace Code Origin)"
+      },
+      {
+        "command": "git-look.openWorkspaceFile",
+        "title": "Git Look: 转到当前文件 (Go to Current File)",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -25,6 +33,13 @@
           "command": "git-look.traceOrigin",
           "group": "navigation",
           "when": "editorTextFocus"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "git-look.openWorkspaceFile",
+          "group": "navigation",
+          "when": "resourceScheme == git-look"
         }
       ]
     },

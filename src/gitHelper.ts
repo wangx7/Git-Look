@@ -1,6 +1,7 @@
 import * as cp from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as vscode from 'vscode';
 
 export interface CommitInfo {
   hash: string;
@@ -34,13 +35,59 @@ export interface GitFilters {
   query?: string;
 }
 
-export function execGit(args: string[], cwd: string): Promise<string> {
+let gitPathCache: string | undefined = undefined;
+
+async function getGitPath(): Promise<string> {
+  if (gitPathCache) {
+    return gitPathCache;
+  }
+  try {
+    const gitExtension = vscode.extensions.getExtension<any>('vscode.git');
+    if (gitExtension) {
+      const activated = gitExtension.isActive ? gitExtension.exports : await gitExtension.activate();
+      const api = activated.getAPI(1);
+      if (api && api.gitPath) {
+        gitPathCache = api.gitPath;
+        return gitPathCache!;
+      }
+    }
+  } catch (e) {
+    console.error('Error retrieving git path from vscode.git extension:', e);
+  }
+  return 'git';
+}
+
+export async function execGit(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
+  const git = await getGitPath();
+  const fullArgs = ['-c', 'core.quotepath=false', ...args];
   return new Promise((resolve, reject) => {
-    cp.execFile('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    cp.execFile(git, fullArgs, { cwd, maxBuffer: 10 * 1024 * 1024, signal }, (error, stdout, stderr) => {
       if (error) {
-        reject(new Error(stderr || error.message));
+        if (error.name === 'AbortError' || (signal && signal.aborted)) {
+          reject(new Error('ABORTED'));
+        } else {
+          reject(new Error(stderr || error.message));
+        }
       } else {
         resolve(stdout);
+      }
+    });
+  });
+}
+
+export async function execGitBuffer(args: string[], cwd: string, signal?: AbortSignal): Promise<Uint8Array> {
+  const git = await getGitPath();
+  const fullArgs = ['-c', 'core.quotepath=false', ...args];
+  return new Promise((resolve, reject) => {
+    cp.execFile(git, fullArgs, { cwd, maxBuffer: 10 * 1024 * 1024, signal, encoding: 'buffer' }, (error, stdout, stderr) => {
+      if (error) {
+        if (error.name === 'AbortError' || (signal && signal.aborted)) {
+          reject(new Error('ABORTED'));
+        } else {
+          reject(new Error(stderr.toString() || error.message));
+        }
+      } else {
+        resolve(new Uint8Array(stdout));
       }
     });
   });
@@ -89,13 +136,13 @@ export async function getCommits(
   cwd: string,
   filters: GitFilters,
   skip: number = 0,
-  limit: number = 150
+  limit: number = 150,
+  signal?: AbortSignal
 ): Promise<CommitInfo[]> {
-  const args = ['log', '--date-order'];
+  const args = ['log', '--topo-order'];
   
-  // Custom format: hash|parents|authorName|authorEmail|authorTimestamp|decorations|subject
-  // parents are space-separated
-  args.push('--pretty=format:%H|%P|%an|%ae|%at|%d|%s');
+  // Custom format using ASCII 0x1f (unit separator) to prevent message delimiter issues
+  args.push('--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%d%x1f%s');
 
   let searchHash: string | null = null;
   if (filters.query) {
@@ -107,7 +154,7 @@ export async function getCommits(
 
   if (searchHash) {
     try {
-      const output = await execGit(['show', '-s', '--pretty=format:%H|%P|%an|%ae|%at|%d|%s', searchHash], cwd);
+      const output = await execGit(['show', '-s', '--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%d%x1f%s', searchHash], cwd, signal);
       const parsed = parseCommitLine(output.trim());
       return parsed ? [parsed] : [];
     } catch {
@@ -147,12 +194,15 @@ export async function getCommits(
   }
 
   try {
-    const output = await execGit(args, cwd);
+    const output = await execGit(args, cwd, signal);
     return output
       .split('\n')
       .map(line => parseCommitLine(line))
       .filter((c): c is CommitInfo => c !== null);
-  } catch (e) {
+  } catch (e: any) {
+    if (e.message === 'ABORTED') {
+      throw e;
+    }
     console.error('Error fetching commits:', e);
     return [];
   }
@@ -162,7 +212,7 @@ function parseCommitLine(line: string): CommitInfo | null {
   if (!line.trim()) {
     return null;
   }
-  const parts = line.split('|');
+  const parts = line.split('\x1f');
   if (parts.length < 7) {
     return null;
   }
@@ -172,15 +222,18 @@ function parseCommitLine(line: string): CommitInfo | null {
   const email = parts[3];
   const timestamp = parseInt(parts[4], 10);
   const decPart = parts[5].trim();
-  const message = parts.slice(6).join('|');
+  const message = parts.slice(6).join('\x1f');
 
   // Parse decorations (e.g. "(HEAD -> master, origin/master, tag: v1.0.0)")
   const decorations: string[] = [];
   if (decPart && decPart.startsWith('(') && decPart.endsWith(')')) {
     const refs = decPart.substring(1, decPart.length - 1).split(', ');
     refs.forEach(ref => {
+      if (ref.startsWith('HEAD -> ') || ref === 'HEAD') {
+        decorations.push('HEAD');
+      }
       const cleanRef = ref.replace('HEAD -> ', '').trim();
-      if (cleanRef) {
+      if (cleanRef && cleanRef !== 'HEAD') {
         decorations.push(cleanRef);
       }
     });
@@ -193,7 +246,8 @@ export async function traceLineHistory(
   cwd: string,
   filePath: string,
   startLine: number,
-  endLine: number
+  endLine: number,
+  signal?: AbortSignal
 ): Promise<CommitDiff[]> {
   const args = [
     'log',
@@ -201,27 +255,27 @@ export async function traceLineHistory(
     `${startLine},${endLine}:${filePath}`,
     '-w', // ignore whitespaces to skip formatting commits
     '--date=raw',
-    '--pretty=format:COMMIT_START|%H|%an|%ae|%at|%s'
+    '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%an%x1f%ae%x1f%at%x1f%s'
   ];
 
   try {
-    const output = await execGit(args, cwd);
+    const output = await execGit(args, cwd, signal);
     const lines = output.split('\n');
     const commits: CommitDiff[] = [];
     let currentCommit: CommitDiff | null = null;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (line.startsWith('COMMIT_START|')) {
+      if (line.startsWith('COMMIT_START_LOOK\x1f')) {
         if (currentCommit) {
           commits.push(currentCommit);
         }
-        const parts = line.substring('COMMIT_START|'.length).split('|');
+        const parts = line.substring('COMMIT_START_LOOK\x1f'.length).split('\x1f');
         const hash = parts[0];
         const author = parts[1];
         const email = parts[2];
         const timestamp = parseInt(parts[3], 10);
-        const message = parts.slice(4).join('|');
+        const message = parts.slice(4).join('\x1f');
 
         currentCommit = {
           hash,
@@ -263,8 +317,12 @@ export async function traceLineHistory(
     }
 
     return commits;
-  } catch (e) {
+  } catch (e: any) {
+    if (e.message === 'ABORTED') {
+      throw e;
+    }
     console.error('Error tracing line history:', e);
     throw e;
   }
 }
+

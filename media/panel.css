@@ -81,12 +81,13 @@ input:focus, select:focus {
 }
 
 input[type="date"] {
-  width: 110px;
+  width: 105px;
+  color-scheme: dark;
 }
 
 .search-group {
   flex-grow: 1;
-  min-width: 140px;
+  min-width: 120px;
 }
 
 .search-group input {
@@ -162,21 +163,13 @@ svg#graph-svg {
 table#commits-table {
   border-collapse: collapse;
   width: 100%;
+  table-layout: fixed;
   position: relative;
   z-index: 5;
 }
 
-table#commits-table th {
-  text-align: left;
-  padding: 4px 8px;
-  background-color: var(--bg-color);
-  border-bottom: 1px solid var(--border-color);
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  font-weight: 600;
-  opacity: 0.8;
-  font-size: 11px;
+table#commits-table thead {
+  display: none !important;
 }
 
 table#commits-table td {
@@ -185,8 +178,6 @@ table#commits-table td {
   vertical-align: middle;
   border-bottom: none;
   white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
   font-size: 12px;
 }
 
@@ -196,30 +187,66 @@ table#commits-table td {
   padding: 0 !important;
 }
 
-.message-col {
-  width: 45%;
-  max-width: 400px;
+.content-col {
+  padding: 0 8px 0 0 !important;
+  width: 100%;
+  border-left: 3px solid transparent;
+  transition: border-color 0.15s ease;
 }
 
-.author-col {
-  width: 15%;
-  max-width: 150px;
+.row-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.commit-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-grow: 1;
+  margin-right: 12px;
+  min-width: 0;
+}
+
+.commit-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-color);
+}
+
+.commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
   color: var(--desc-fg);
   font-size: 11px;
 }
 
-.date-col {
-  width: 15%;
-  max-width: 150px;
-  color: var(--desc-fg);
-  font-size: 11px;
+.commit-author {
+  width: 90px;
+  min-width: 90px;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.hash-col {
-  width: 10%;
-  font-family: monospace;
-  color: var(--desc-fg);
-  font-size: 11px;
+.commit-date {
+  width: 115px;
+  min-width: 115px;
+  max-width: 115px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── 行悬停与选中 ─────────────────────── */
@@ -236,8 +263,18 @@ tr.commit-row.selected {
   background-color: var(--row-selected-bg);
 }
 
+tr.commit-row.selected td.content-col {
+  /* removed selection glow border color */
+}
+
 /* ── 点击复制 Hash ─────────────────────── */
 .hash-copyable {
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
+  text-align: center;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
   cursor: pointer;
   transition: color 0.15s ease;
 }
@@ -248,6 +285,10 @@ tr.commit-row.selected {
 }
 
 .hash-copied {
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
+  text-align: center;
   color: var(--badge-original-bg, #10b981) !important;
 }
 
@@ -258,12 +299,12 @@ tr.commit-row.selected {
 
 /* ── 详细展开行 ─────────────────────── */
 tr.detail-row {
-  background-color: rgba(255, 255, 255, 0.01);
+  background-color: transparent;
 }
 
 tr.detail-row td {
   height: auto !important;
-  padding: 10px 16px !important;
+  padding: 6px 12px 12px 12px !important;
   white-space: normal !important;
   border-bottom: 1px solid var(--border-color) !important;
 }
@@ -305,12 +346,36 @@ tr.detail-row td {
   flex-direction: column;
   gap: 1px;
   margin-top: 4px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 4px;
-  background-color: rgba(0, 0, 0, 0.1);
-  max-height: 260px;
-  overflow-y: auto;
+  border: none;
+  padding: 4px 0;
+  background-color: transparent;
+}
+
+.file-actions {
+  display: none;
+  align-items: center;
+  margin-right: 8px;
+}
+
+.tree-node.file-node:hover .file-actions {
+  display: inline-flex;
+}
+
+.action-btn {
+  font-size: 13px !important;
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+  color: var(--fg-color);
+  line-height: 1;
+}
+
+.action-btn:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-link);
 }
 
 .tree-node {
@@ -475,6 +540,12 @@ tr.detail-row td {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.badge-merge {
+  background-color: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
 /* ── 加载遮罩 ─────────────────────── */
 .loading-overlay {
   position: absolute;
@@ -525,3 +596,269 @@ tr.detail-row td {
   font-size: 28px;
   opacity: 0.4;
 }
+
+/* ── IntelliJ 分栏布局 & GitLens 悬停高亮 ─────────────────────── */
+
+.main-layout {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.left-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 200px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.list-pane {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  position: relative;
+  width: 100%;
+}
+
+.resizer-bar {
+  width: 5px;
+  min-width: 5px;
+  cursor: col-resize;
+  background-color: transparent;
+  border-left: 1px solid var(--border-color);
+  z-index: 45;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  box-sizing: border-box;
+}
+
+.resizer-bar:hover,
+.resizer-bar.dragging {
+  background-color: var(--vscode-sash-hoverBorder, var(--text-link, #007acc));
+  border-left-color: var(--vscode-sash-hoverBorder, var(--text-link, #007acc));
+}
+
+.details-pane {
+  width: 380px;
+  min-width: 280px;
+  max-width: 60%;
+  height: 100%;
+  border-left: none;
+  background-color: var(--bg-color);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  box-sizing: border-box;
+  z-index: 30;
+}
+
+.details-pane.empty {
+  justify-content: center;
+  align-items: center;
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.02) 0%, transparent 70%);
+}
+
+.details-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--vscode-descriptionForeground, rgba(255, 255, 255, 0.35));
+  text-align: center;
+}
+
+.details-placeholder .codicon {
+  font-size: 36px;
+  color: var(--vscode-editorCodeLens-foreground, rgba(255, 255, 255, 0.2));
+  animation: detailsPulse 3s infinite ease-in-out;
+}
+
+@keyframes detailsPulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.05); }
+}
+
+.details-content {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: slideDown 0.15s ease-out;
+}
+
+.details-header-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+}
+
+.details-commit-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.details-commit-title h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--fg-color);
+  word-break: break-word;
+}
+
+.detail-hash-copyable {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-link);
+  cursor: pointer;
+  align-self: flex-start;
+  background-color: rgba(255,255,255,0.04);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+  user-select: none;
+}
+
+.detail-hash-copyable:hover {
+  text-decoration: underline;
+  background-color: rgba(255,255,255,0.08);
+}
+
+.details-author-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.details-author-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+#detail-author-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-color);
+}
+
+#detail-author-date {
+  font-size: 11px;
+  color: var(--desc-fg);
+}
+
+.details-files-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.files-header {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--desc-fg);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px dashed var(--border-color);
+  padding-bottom: 4px;
+}
+
+#detail-stats-container {
+  margin-left: auto;
+}
+
+/* 头像圆圈 */
+.avatar-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  color: #fff;
+  margin-right: 6px;
+  flex-shrink: 0;
+  user-select: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.details-author-row .avatar-circle {
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
+
+/* GitLens 悬停分支高亮 */
+svg#graph-svg {
+  pointer-events: none;
+}
+
+svg#graph-svg path {
+  pointer-events: stroke;
+}
+
+svg#graph-svg circle {
+  pointer-events: fill;
+}
+
+/* SVG hover transition rules */
+svg#graph-svg.hover-active path,
+svg#graph-svg.hover-active circle {
+  transition: opacity 0.1s ease, r 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+svg#graph-svg.hover-active path:hover,
+svg#graph-svg.hover-active circle:hover {
+  cursor: pointer;
+}
+
+/* 各车道的高亮覆盖 (支持到 24 条车道) - 仅高亮透明度，不开粗 */
+svg#graph-svg.hover-lane-0 path.lane-0, svg#graph-svg.hover-lane-0 circle.lane-0,
+svg#graph-svg.hover-lane-1 path.lane-1, svg#graph-svg.hover-lane-1 circle.lane-1,
+svg#graph-svg.hover-lane-2 path.lane-2, svg#graph-svg.hover-lane-2 circle.lane-2,
+svg#graph-svg.hover-lane-3 path.lane-3, svg#graph-svg.hover-lane-3 circle.lane-3,
+svg#graph-svg.hover-lane-4 path.lane-4, svg#graph-svg.hover-lane-4 circle.lane-4,
+svg#graph-svg.hover-lane-5 path.lane-5, svg#graph-svg.hover-lane-5 circle.lane-5,
+svg#graph-svg.hover-lane-6 path.lane-6, svg#graph-svg.hover-lane-6 circle.lane-6,
+svg#graph-svg.hover-lane-7 path.lane-7, svg#graph-svg.hover-lane-7 circle.lane-7,
+svg#graph-svg.hover-lane-8 path.lane-8, svg#graph-svg.hover-lane-8 circle.lane-8,
+svg#graph-svg.hover-lane-9 path.lane-9, svg#graph-svg.hover-lane-9 circle.lane-9,
+svg#graph-svg.hover-lane-10 path.lane-10, svg#graph-svg.hover-lane-10 circle.lane-10,
+svg#graph-svg.hover-lane-11 path.lane-11, svg#graph-svg.hover-lane-11 circle.lane-11,
+svg#graph-svg.hover-lane-12 path.lane-12, svg#graph-svg.hover-lane-12 circle.lane-12,
+svg#graph-svg.hover-lane-13 path.lane-13, svg#graph-svg.hover-lane-13 circle.lane-13,
+svg#graph-svg.hover-lane-14 path.lane-14, svg#graph-svg.hover-lane-14 circle.lane-14,
+svg#graph-svg.hover-lane-15 path.lane-15, svg#graph-svg.hover-lane-15 circle.lane-15,
+svg#graph-svg.hover-lane-16 path.lane-16, svg#graph-svg.hover-lane-16 circle.lane-16,
+svg#graph-svg.hover-lane-17 path.lane-17, svg#graph-svg.hover-lane-17 circle.lane-17,
+svg#graph-svg.hover-lane-18 path.lane-18, svg#graph-svg.hover-lane-18 circle.lane-18,
+svg#graph-svg.hover-lane-19 path.lane-19, svg#graph-svg.hover-lane-19 circle.lane-19,
+svg#graph-svg.hover-lane-20 path.lane-20, svg#graph-svg.hover-lane-20 circle.lane-20,
+svg#graph-svg.hover-lane-21 path.lane-21, svg#graph-svg.hover-lane-21 circle.lane-21,
+svg#graph-svg.hover-lane-22 path.lane-22, svg#graph-svg.hover-lane-22 circle.lane-22,
+svg#graph-svg.hover-lane-23 path.lane-23, svg#graph-svg.hover-lane-23 circle.lane-23 {
+  opacity: 1 !important;
+}
+
+svg#graph-svg circle {
+  transition: r 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 行悬浮时，分支节点变大 */
+svg#graph-svg circle.hovered {
+  r: 6.5px !important;
+  cursor: pointer;
+  stroke-width: 2.2px !important;
+}
+

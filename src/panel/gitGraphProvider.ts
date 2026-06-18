@@ -6,6 +6,7 @@ import { getCommits, getBranches, getAuthors, execGit } from '../gitHelper';
 export class GitGraphProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'git-look.graphView';
   private _view?: vscode.WebviewView;
+  private _abortController?: AbortController;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -38,25 +39,43 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
       switch (data.command) {
         case 'loadData': {
+          if (this._abortController) {
+            this._abortController.abort();
+          }
+          this._abortController = new AbortController();
+          const signal = this._abortController.signal;
+
           try {
             const page = typeof data.page === 'number' ? data.page : 0;
             const pageSize = 150;
             const skip = page * pageSize;
 
-            const [branches, authors, commits] = await Promise.all([
+            const [branches, remoteBranches, authors, commits] = await Promise.all([
               getBranches(cwd),
+              execGit(['branch', '-r', '--format=%(refname:short)'], cwd, signal).then(out => 
+                out.split('\n').map(b => b.trim()).filter(Boolean)
+              ).catch(() => []),
               getAuthors(cwd),
-              getCommits(cwd, data.filters || {}, skip, pageSize)
+              getCommits(cwd, data.filters || {}, skip, pageSize, signal)
             ]);
+
+            if (signal.aborted) {
+              return;
+            }
 
             webviewView.webview.postMessage({
               type: 'dataLoaded',
               branches,
+              remoteBranches,
               authors,
               commits,
               page
             });
           } catch (err: any) {
+            if (err.message === 'ABORTED' || (this._abortController && this._abortController.signal.aborted)) {
+              // Ignore aborted commands
+              return;
+            }
             webviewView.webview.postMessage({
               type: 'error',
               error: err.message || '获取 Git 数据失败'
@@ -66,18 +85,45 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         }
         case 'getCommitDetail': {
           try {
-            // Get files changed in this commit
-            // git diff-tree --no-commit-id --name-status -r <hash>
-            const stdout = await execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', data.hash], cwd);
-            const files = stdout.split('\n').filter(Boolean).map(line => {
-              const [status, filePath] = line.split(/\s+/);
-              return { status, path: filePath };
+            // Get files changed in this commit including additions/deletions and handling merge commits (-m)
+            // Also fetch all branch names containing this commit
+            const [statusOut, numstatOut, branchesContainingCommit] = await Promise.all([
+              execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', '-m', '--root', data.hash], cwd),
+              execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', data.hash], cwd),
+              execGit(['branch', '-a', '--contains', data.hash, '--format=%(refname:short)'], cwd).then(out => {
+                return out.split('\n').map(b => b.trim()).filter(b => b.length > 0 && b !== 'origin/HEAD' && b !== 'HEAD');
+              }).catch(() => [] as string[])
+            ]);
+
+            const fileStatusMap = new Map<string, string>();
+            statusOut.split('\n').filter(Boolean).forEach(line => {
+              const parts = line.split(/\s+/);
+              if (parts.length >= 2) {
+                fileStatusMap.set(parts[parts.length - 1], parts[0].charAt(0));
+              }
+            });
+
+            const filesMap = new Map<string, any>();
+            numstatOut.split('\n').filter(Boolean).forEach(line => {
+              const parts = line.split(/\t+/);
+              if (parts.length >= 3) {
+                const filePath = parts[2];
+                if (!filesMap.has(filePath)) {
+                  filesMap.set(filePath, {
+                    status: fileStatusMap.get(filePath) || 'M',
+                    path: filePath,
+                    additions: parts[0] === '-' ? 0 : parseInt(parts[0], 10),
+                    deletions: parts[1] === '-' ? 0 : parseInt(parts[1], 10)
+                  });
+                }
+              }
             });
             
             webviewView.webview.postMessage({
               type: 'commitDetail',
               hash: data.hash,
-              files
+              files: Array.from(filesMap.values()),
+              branches: branchesContainingCommit
             });
           } catch (err: any) {
             webviewView.webview.postMessage({
@@ -88,12 +134,121 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'openDiff': {
-          const { file, hash, parentHash } = data;
-          const leftUri = vscode.Uri.parse(`git-look://${parentHash || 'empty'}/${file}`);
-          const rightUri = vscode.Uri.parse(`git-look://${hash}/${file}`);
-          const title = `${path.basename(file)} (${hash.substring(0, 7)} vs ${parentHash ? parentHash.substring(0, 7) : 'empty'})`;
+          const { file, hash } = data;
+          let parentHash = data.parentHash;
+
+          const cwd = this._getCwd();
+          if (cwd) {
+            try {
+              const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], cwd)).trim();
+              const parents = parentsStr ? parentsStr.split(/\s+/) : [];
+              if (parents.length > 0) {
+                // Check if file exists in the current commit
+                let existsInCurrent = false;
+                try {
+                  await execGit(['cat-file', '-e', `${hash}:${file}`], cwd);
+                  existsInCurrent = true;
+                } catch (e) {
+                  // File does not exist in current commit (deleted)
+                }
+
+                if (existsInCurrent) {
+                  // If it exists in the current commit, check if it exists in the primary parent
+                  let existsInPrimaryParent = false;
+                  try {
+                    await execGit(['cat-file', '-e', `${parents[0]}:${file}`], cwd);
+                    existsInPrimaryParent = true;
+                  } catch (e) {
+                    // File does not exist in primary parent (added)
+                  }
+
+                  if (existsInPrimaryParent) {
+                    parentHash = parents[0];
+                  } else {
+                    parentHash = 'empty';
+                  }
+                } else {
+                  // If it does not exist in current commit (deleted), find which parent contains it
+                  let foundParent = '';
+                  for (const parent of parents) {
+                    try {
+                      await execGit(['cat-file', '-e', `${parent}:${file}`], cwd);
+                      foundParent = parent;
+                      break;
+                    } catch (e) {
+                      // File does not exist in this parent
+                    }
+                  }
+                  parentHash = foundParent || 'empty';
+                }
+              }
+            } catch (e) {
+              // Ignore and fall back to default
+            }
+          }
+
+          const absolutePath = path.isAbsolute(file) ? file : path.join(cwd || '', file);
+          const leftUri = vscode.Uri.from({
+            scheme: 'git',
+            path: absolutePath,
+            query: JSON.stringify({
+              path: absolutePath,
+              ref: parentHash === 'empty' ? '~' : parentHash
+            })
+          });
+          const rightUri = vscode.Uri.from({
+            scheme: 'git',
+            path: absolutePath,
+            query: JSON.stringify({
+              path: absolutePath,
+              ref: hash
+            })
+          });
+          const title = `${path.basename(file)} (${hash.substring(0, 7)} vs ${parentHash && parentHash !== 'empty' ? parentHash.substring(0, 7) : 'empty'})`;
           
           await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+          break;
+        }
+        case 'openWorkspaceFile': {
+          const { file } = data;
+          const uri = vscode.Uri.from({
+            scheme: 'git-look',
+            authority: 'empty',
+            path: file.startsWith('/') ? file : '/' + file
+          });
+          await vscode.commands.executeCommand('git-look.openWorkspaceFile', uri);
+          break;
+        }
+        case 'openAllDiffs': {
+          try {
+            const { hash, files, parentHash, message } = data;
+            const resourceList = files.map((f: any) => {
+              const absolutePath = path.isAbsolute(f.path) ? f.path : path.join(cwd || '', f.path);
+              const leftUri = vscode.Uri.from({
+                scheme: 'git',
+                path: absolutePath,
+                query: JSON.stringify({
+                  path: absolutePath,
+                  ref: parentHash === 'empty' ? '~' : parentHash
+                })
+              });
+              const rightUri = vscode.Uri.from({
+                scheme: 'git',
+                path: absolutePath,
+                query: JSON.stringify({
+                  path: absolutePath,
+                  ref: hash
+                })
+              });
+              return [rightUri, leftUri, rightUri];
+            });
+            const title = `${hash.substring(0, 7)} - ${message || ''} (${files.length} 个文件)`;
+            console.log(`[Git-Look] openAllDiffs: opening ${resourceList.length} changes with title "${title}"`);
+            await vscode.commands.executeCommand('vscode.changes', title, resourceList);
+          } catch (e: any) {
+            vscode.window.showErrorMessage(`无法打开多文件对比: ${e.message}`);
+            console.error('Error in openAllDiffs:', e);
+          }
           break;
         }
       }
@@ -108,12 +263,13 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'panel.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'panel.css'));
     const codiconUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(vscode.Uri.file(vscode.env.appRoot), 'out', 'media', 'codicon.css')
+      vscode.Uri.joinPath(this._extensionUri, 'media', 'codicon.css')
     );
 
-    html = html.replace('${scriptUri}', scriptUri.toString());
-    html = html.replace('${styleUri}', styleUri.toString());
-    html = html.replace('${codiconUri}', codiconUri.toString());
+    html = html.replace(/\${scriptUri}/g, scriptUri.toString());
+    html = html.replace(/\${styleUri}/g, styleUri.toString());
+    html = html.replace(/\${codiconUri}/g, codiconUri.toString());
+    html = html.replace(/\${cspSource}/g, webview.cspSource);
 
     return html;
   }
