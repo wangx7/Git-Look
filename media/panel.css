@@ -1,0 +1,527 @@
+:root {
+  --font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+  --bg-color: var(--vscode-editor-background, #1e1e1e);
+  --fg-color: var(--vscode-editor-foreground, #bbbbbb);
+  --border-color: var(--vscode-panel-border, #3c3c3c);
+  --input-bg: var(--vscode-input-background, #3c3c3c);
+  --input-fg: var(--vscode-input-foreground, #cccccc);
+  --input-border: var(--vscode-input-border, transparent);
+  --select-bg: var(--vscode-dropdown-background, #3c3c3c);
+  --select-fg: var(--vscode-dropdown-foreground, #cccccc);
+  --btn-bg: var(--vscode-button-background, #0e639c);
+  --btn-fg: var(--vscode-button-foreground, #ffffff);
+  --btn-hover-bg: var(--vscode-button-hoverBackground, #1177bb);
+  --row-hover-bg: var(--vscode-list-hoverBackground, #2a2d2e);
+  --row-selected-bg: var(--vscode-list-activeSelectionBackground, #37373d);
+  --text-link: var(--vscode-textLink-foreground, #3794ff);
+  --error-bg: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+  --error-border: var(--vscode-inputValidation-errorBorder, #be1100);
+  --badge-fg: var(--vscode-badge-foreground, #ffffff);
+  --badge-bg: var(--vscode-badge-background, #4d4d4d);
+  --desc-fg: var(--vscode-descriptionForeground, #717171);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family);
+  background-color: var(--bg-color);
+  color: var(--fg-color);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+}
+
+/* ── 过滤工具栏 ─────────────────────── */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  background-color: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filter-group label {
+  opacity: 0.6;
+  display: flex;
+  align-items: center;
+}
+
+.filter-group label .codicon {
+  font-size: 14px;
+}
+
+input, select {
+  background-color: var(--input-bg);
+  color: var(--input-fg);
+  border: 1px solid var(--input-border);
+  padding: 3px 6px;
+  border-radius: 3px;
+  outline: none;
+  font-size: 11px;
+  transition: border-color 0.15s ease;
+}
+
+input:focus, select:focus {
+  border-color: var(--text-link);
+}
+
+input[type="date"] {
+  width: 110px;
+}
+
+.search-group {
+  flex-grow: 1;
+  min-width: 140px;
+}
+
+.search-group input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ── 按钮 ─────────────────────── */
+.btn {
+  background-color: var(--btn-bg);
+  color: var(--btn-fg);
+  border: none;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn:hover {
+  background-color: var(--btn-hover-bg);
+}
+
+.btn-secondary {
+  background-color: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--fg-color);
+}
+
+.btn-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* ── 错误提示 ─────────────────────── */
+.error-banner {
+  background-color: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: #fff;
+  padding: 6px 10px;
+  margin: 6px 10px 0 10px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ── 主展示区 ─────────────────────── */
+.table-container {
+  position: relative;
+  flex-grow: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.canvas-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+svg#graph-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+table#commits-table {
+  border-collapse: collapse;
+  width: 100%;
+  position: relative;
+  z-index: 5;
+}
+
+table#commits-table th {
+  text-align: left;
+  padding: 4px 8px;
+  background-color: var(--bg-color);
+  border-bottom: 1px solid var(--border-color);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  font-weight: 600;
+  opacity: 0.8;
+  font-size: 11px;
+}
+
+table#commits-table td {
+  padding: 0 8px;
+  height: 24px;
+  vertical-align: middle;
+  border-bottom: none;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.graph-col {
+  width: 120px;
+  min-width: 80px;
+  padding: 0 !important;
+}
+
+.message-col {
+  width: 45%;
+  max-width: 400px;
+}
+
+.author-col {
+  width: 15%;
+  max-width: 150px;
+  color: var(--desc-fg);
+  font-size: 11px;
+}
+
+.date-col {
+  width: 15%;
+  max-width: 150px;
+  color: var(--desc-fg);
+  font-size: 11px;
+}
+
+.hash-col {
+  width: 10%;
+  font-family: monospace;
+  color: var(--desc-fg);
+  font-size: 11px;
+}
+
+/* ── 行悬停与选中 ─────────────────────── */
+tr.commit-row {
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+tr.commit-row:hover {
+  background-color: var(--row-hover-bg);
+}
+
+tr.commit-row.selected {
+  background-color: var(--row-selected-bg);
+}
+
+/* ── 点击复制 Hash ─────────────────────── */
+.hash-copyable {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.hash-copyable:hover {
+  color: var(--text-link);
+  text-decoration: underline;
+}
+
+.hash-copied {
+  color: var(--badge-original-bg, #10b981) !important;
+}
+
+/* ── 相对时间 ─────────────────────── */
+.relative-time {
+  cursor: help;
+}
+
+/* ── 详细展开行 ─────────────────────── */
+tr.detail-row {
+  background-color: rgba(255, 255, 255, 0.01);
+}
+
+tr.detail-row td {
+  height: auto !important;
+  padding: 10px 16px !important;
+  white-space: normal !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+.detail-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: slideDown 0.15s ease-out;
+}
+
+.detail-header {
+  font-weight: 600;
+  font-size: 11px;
+  border-bottom: 1px dashed var(--border-color);
+  padding-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--desc-fg);
+}
+
+.detail-stats {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: normal;
+}
+
+.stat-add { color: #4caf50; }
+.stat-modify { color: #2196f3; }
+.stat-delete { color: #f44336; }
+.stat-rename { color: #ff9800; }
+
+/* ── 文件树形目录结构 ─────────────────────── */
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px;
+  background-color: rgba(0, 0, 0, 0.1);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 6px;
+  user-select: none;
+  font-size: 12px;
+  transition: background-color 0.1s ease;
+}
+
+.tree-node:hover {
+  background-color: var(--row-hover-bg);
+}
+
+/* Codicon 图标样式适配 */
+.tree-node .codicon {
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.tree-chevron {
+  flex-shrink: 0;
+  font-size: 12px !important;
+  transform: rotate(0deg);
+  transition: transform 0.1s ease;
+  opacity: 0.5;
+}
+
+.tree-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.folder-icon {
+  color: var(--vscode-symbolIcon-folderForeground, #dcb67a);
+}
+
+.file-icon {
+  opacity: 0.85;
+}
+
+/* 文件扩展名特定图标颜色 */
+.file-icon-ts { color: #3178c6; }
+.file-icon-js { color: #f1e05a; }
+.file-icon-vue { color: #42b883; }
+.file-icon-css { color: #563d7c; }
+.file-icon-html { color: #e34c26; }
+.file-icon-json { color: #f5c518; }
+.file-icon-md { color: #519aba; }
+.file-icon-py { color: #3572a5; }
+.file-icon-java { color: #b07219; }
+.file-icon-go { color: #00add8; }
+.file-icon-rs { color: #dea584; }
+.file-icon-sh { color: #89e051; }
+.file-icon-yaml { color: #cb171e; }
+.file-icon-xml { color: #e44d26; }
+.file-icon-sql { color: #e38c00; }
+.file-icon-swift { color: #f05138; }
+.file-icon-kt { color: #a97bff; }
+.file-icon-rb { color: #cc342d; }
+.file-icon-php { color: #4f5d95; }
+.file-icon-c { color: #555555; }
+.file-icon-cpp { color: #f34b7d; }
+.file-icon-cs { color: #178600; }
+
+/* 压缩路径中的斜杠分隔样式 */
+.compressed-path-sep {
+  opacity: 0.35;
+  margin: 0 1px;
+}
+
+.folder-name {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.file-name {
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-status-badge {
+  font-size: 9px;
+  font-weight: bold;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: auto;
+  text-align: center;
+  min-width: 10px;
+  opacity: 0.9;
+}
+
+.status-A {
+  background-color: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+}
+
+.status-M {
+  background-color: rgba(33, 150, 243, 0.15);
+  color: #2196f3;
+}
+
+.status-D {
+  background-color: rgba(244, 67, 54, 0.15);
+  color: #f44336;
+}
+
+.status-R {
+  background-color: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+}
+
+.status-C {
+  background-color: rgba(156, 39, 176, 0.15);
+  color: #9c27b0;
+}
+
+.folder-children.hidden {
+  display: none;
+}
+
+/* ── 分支与标签提示 ─────────────────────── */
+.ref-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-right: 4px;
+  vertical-align: middle;
+  line-height: 16px;
+}
+
+.ref-badge .codicon {
+  font-size: 11px;
+}
+
+.badge-branch {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.badge-remote-branch {
+  border: 1px solid rgba(139, 92, 246, 0.4);
+}
+
+.badge-tag {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: #fde047;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.badge-head {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* ── 加载遮罩 ─────────────────────── */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(1px);
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  border-top: 2px solid var(--text-link);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ── 动画 ─────────────────────── */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 空状态 ─────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 8px;
+  opacity: 0.5;
+}
+
+.empty-state .codicon {
+  font-size: 28px;
+  opacity: 0.4;
+}

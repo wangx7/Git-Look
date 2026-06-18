@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="${codiconUri}">
+  <link rel="stylesheet" href="${styleUri}">
+  <title>Git Graph</title>
+</head>
+<body>
+  <div class="container">
+    <!-- 过滤工具栏 -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <label for="branch-select"><i class="codicon codicon-git-branch"></i></label>
+        <select id="branch-select">
+          <option value="">所有分支</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="author-select"><i class="codicon codicon-person"></i></label>
+        <select id="author-select">
+          <option value="">所有作者</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="since-date"><i class="codicon codicon-calendar"></i></label>
+        <input type="date" id="since-date" title="起始日期">
+      </div>
+
+      <div class="filter-group">
+        <label for="until-date">~</label>
+        <input type="date" id="until-date" title="截止日期">
+      </div>
+
+      <div class="filter-group search-group">
+        <input type="text" id="search-input" placeholder="搜索提交消息或哈希...">
+      </div>
+
+      <button id="reset-btn" class="btn btn-secondary" title="重置所有过滤条件">
+        <i class="codicon codicon-clear-all"></i>
+      </button>
+    </div>
+
+    <!-- 错误提示 -->
+    <div id="error-message" class="error-banner hidden"></div>
+
+    <!-- 主展示区 -->
+    <div class="table-container">
+      <div id="loading" class="loading-overlay hidden">
+        <div class="spinner"></div>
+      </div>
+
+      <div class="canvas-wrapper">
+        <svg id="graph-svg"></svg>
+        <table id="commits-table">
+          <thead>
+            <tr>
+              <th class="graph-col">图表</th>
+              <th class="message-col">提交消息</th>
+              <th class="author-col">作者</th>
+              <th class="date-col">日期</th>
+              <th class="hash-col">哈希</th>
+            </tr>
+          </thead>
+          <tbody id="commits-tbody">
+            <!-- 提交行将动态插入此处 -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="${scriptUri}"></script>
+</body>
+</html>

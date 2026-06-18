@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="${styleUri}">
+  <link rel="stylesheet" href="${codiconUri}">
+  <title>Code Tracing</title>
+</head>
+<body>
+  <div class="container">
+    <!-- 头部信息 -->
+    <div class="header">
+      <div class="title">代码源头与修改历史追溯</div>
+      <div class="meta">
+        文件: <span id="file-path" class="path">正在加载...</span>
+        行范围: <span id="line-range" class="badge">...</span>
+      </div>
+      <div id="commit-summary" class="commit-summary hidden"></div>
+    </div>
+
+    <!-- 错误横幅 -->
+    <div id="error-message" class="error-banner hidden"></div>
+
+    <!-- 加载指示器 -->
+    <div id="loading" class="loading-container hidden">
+      <div class="spinner"></div>
+    </div>
+
+    <!-- 历史时间轴 -->
+    <div class="timeline" id="timeline-container">
+      <!-- 提交记录卡片将在这里动态生成 -->
+    </div>
+  </div>
+
+  <script src="${scriptUri}"></script>
+</body>
+</html>

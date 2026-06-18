@@ -1,0 +1,62 @@
+{
+  "name": "git-look",
+  "displayName": "Git Look",
+  "description": "Visual Git history graph & Code origin tracing tool",
+  "version": "0.0.1",
+  "publisher": "git-look",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Visualization"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "git-look.traceOrigin",
+        "title": "Git Look: 追溯代码源头 (Trace Code Origin)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "git-look.traceOrigin",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "git-look-panel",
+          "title": "Git Look",
+          "icon": "$(graph)"
+        }
+      ]
+    },
+    "views": {
+      "git-look-panel": [
+        {
+          "type": "webview",
+          "id": "git-look.graphView",
+          "name": "Git Graph"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production"
+  },
+  "devDependencies": {
+    "@types/node": "^18.11.18",
+    "@types/vscode": "^1.75.0",
+    "esbuild": "^0.17.5",
+    "typescript": "^4.9.5"
+  }
+}
