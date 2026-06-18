@@ -182,22 +182,15 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             }
           }
 
-          const absolutePath = path.isAbsolute(file) ? file : path.join(cwd || '', file);
           const leftUri = vscode.Uri.from({
-            scheme: 'git',
-            path: absolutePath,
-            query: JSON.stringify({
-              path: absolutePath,
-              ref: parentHash === 'empty' ? '~' : parentHash
-            })
+            scheme: 'git-look',
+            authority: parentHash || 'empty',
+            path: file.startsWith('/') ? file : '/' + file
           });
           const rightUri = vscode.Uri.from({
-            scheme: 'git',
-            path: absolutePath,
-            query: JSON.stringify({
-              path: absolutePath,
-              ref: hash
-            })
+            scheme: 'git-look',
+            authority: hash,
+            path: file.startsWith('/') ? file : '/' + file
           });
           const title = `${path.basename(file)} (${hash.substring(0, 7)} vs ${parentHash && parentHash !== 'empty' ? parentHash.substring(0, 7) : 'empty'})`;
           
@@ -218,22 +211,15 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           try {
             const { hash, files, parentHash, message } = data;
             const resourceList = files.map((f: any) => {
-              const absolutePath = path.isAbsolute(f.path) ? f.path : path.join(cwd || '', f.path);
               const leftUri = vscode.Uri.from({
-                scheme: 'git',
-                path: absolutePath,
-                query: JSON.stringify({
-                  path: absolutePath,
-                  ref: parentHash === 'empty' ? '~' : parentHash
-                })
+                scheme: 'git-look',
+                authority: parentHash || 'empty',
+                path: f.path.startsWith('/') ? f.path : '/' + f.path
               });
               const rightUri = vscode.Uri.from({
-                scheme: 'git',
-                path: absolutePath,
-                query: JSON.stringify({
-                  path: absolutePath,
-                  ref: hash
-                })
+                scheme: 'git-look',
+                authority: hash,
+                path: f.path.startsWith('/') ? f.path : '/' + f.path
               });
               return [rightUri, leftUri, rightUri];
             });

@@ -19,6 +19,7 @@
   const resizerBar = document.getElementById('resizer-bar');
   const detailsPlaceholder = document.querySelector('.details-placeholder');
   const detailsContent = document.querySelector('.details-content');
+  const detailHashBadge = document.getElementById('detail-hash-badge');
   const detailMergeBadge = document.getElementById('detail-merge-badge');
   const detailMsg = document.getElementById('detail-msg');
   const detailStatsRow = document.getElementById('detail-stats-row');
@@ -627,8 +628,8 @@
                 <span class="commit-message" title="${escapeHtml(c.message)}">${escapeHtml(c.message)}</span>
               </div>
               <div class="commit-meta">
-                ${decsHtml}
                 <span class="commit-author" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</span>
+                ${decsHtml}
                 <span class="commit-date" title="${relTime}">${absTime}</span>
                 <span class="hash-copyable" data-full-hash="${c.hash}">${c.hash.substring(0, 7)}</span>
               </div>
@@ -835,6 +836,9 @@
     detailsPlaceholder.classList.add('hidden');
     detailsContent.classList.remove('hidden');
 
+    detailHashBadge.textContent = hash.substring(0, 7);
+    detailHashBadge.dataset.fullHash = hash;
+
     // Render all branch badges in detail panel
     const branchesContainer = document.getElementById('detail-branches-container');
     if (branchesContainer) {
@@ -879,6 +883,17 @@
     } else {
       detailMergeBadge.classList.add('hidden');
     }
+    
+    // 复制哈希点击事件
+    detailHashBadge.onclick = (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(hash).then(() => {
+        detailHashBadge.textContent = '已复制!';
+        setTimeout(() => {
+          detailHashBadge.textContent = hash.substring(0, 7);
+        }, 1200);
+      });
+    };
 
     detailMsg.textContent = commit.message;
 

@@ -7,9 +7,6 @@
   "engines": {
     "vscode": "^1.75.0"
   },
-  "activationEvents": [
-    "onStartupFinished"
-  ],
   "categories": [
     "SCM Providers",
     "Visualization"
