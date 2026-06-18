@@ -86,13 +86,9 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         case 'getCommitDetail': {
           try {
             // Get files changed in this commit including additions/deletions and handling merge commits (-m)
-            // Also fetch all branch names containing this commit
-            const [statusOut, numstatOut, branchesContainingCommit] = await Promise.all([
+            const [statusOut, numstatOut] = await Promise.all([
               execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', '-m', '--root', data.hash], cwd),
-              execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', data.hash], cwd),
-              execGit(['branch', '-a', '--contains', data.hash, '--format=%(refname:short)'], cwd).then(out => {
-                return out.split('\n').map(b => b.trim()).filter(b => b.length > 0 && b !== 'origin/HEAD' && b !== 'HEAD');
-              }).catch(() => [] as string[])
+              execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', data.hash], cwd)
             ]);
 
             const fileStatusMap = new Map<string, string>();
@@ -122,8 +118,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             webviewView.webview.postMessage({
               type: 'commitDetail',
               hash: data.hash,
-              files: Array.from(filesMap.values()),
-              branches: branchesContainingCommit
+              files: Array.from(filesMap.values())
             });
           } catch (err: any) {
             webviewView.webview.postMessage({

@@ -298,7 +298,7 @@
         saveCurrentState();
         break;
       case 'commitDetail':
-        renderCommitDetail(message.hash, message.files, message.branches);
+        renderCommitDetail(message.hash, message.files);
         break;
       case 'focusCommit':
         focusAndHighlightCommit(message.hash);
@@ -1021,61 +1021,13 @@
     return html;
   }
 
-  function renderCommitDetail(hash, files, branches) {
+  function renderCommitDetail(hash, files) {
     if (selectedCommitHash !== hash) return;
 
     const row = commitsTbody.querySelector(`tr.commit-row[data-hash="${hash}"]`);
     if (!row) return;
     const parents = JSON.parse(row.dataset.parents);
     const parentHash = parents[0] || '';
-
-    // Render branch badges in detail panel
-    const branchesContainer = document.getElementById('detail-branches-container');
-    if (branchesContainer) {
-      branchesContainer.innerHTML = '';
-      const commit = commits.find(c => c.hash === hash);
-      const allRefs = new Set();
-      if (commit && commit.decorations) {
-        commit.decorations.forEach(dec => allRefs.add(dec));
-      }
-      if (branches) {
-        branches.forEach(b => allRefs.add(b));
-      }
-
-      if (allRefs.size > 0) {
-        allRefs.forEach(dec => {
-          let badgeClass = 'badge-branch';
-          let iconHtml = '<i class="codicon codicon-git-branch"></i>';
-          let badgeColor = branchColorMap.get(dec) || colors[0];
-          let isHead = false;
-          const isRemote = remoteBranches.includes(dec) || dec.startsWith('origin/');
-
-          if (dec.startsWith('tag: ')) {
-            badgeClass = 'badge-tag';
-            iconHtml = '<i class="codicon codicon-tag"></i>';
-            dec = dec.substring(5);
-            badgeColor = '#f59e0b';
-          } else if (isRemote) {
-            badgeClass = 'badge-remote-branch';
-            iconHtml = '<i class="codicon codicon-cloud"></i>';
-          } else if (dec === 'HEAD') {
-            badgeClass = 'badge-head';
-            iconHtml = '<i class="codicon codicon-circle-filled"></i>';
-            isHead = true;
-          }
-
-          const style = isHead
-            ? `background-color: rgba(255,255,255,0.08); color: #fff;`
-            : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor};`;
-
-          const span = document.createElement('span');
-          span.className = `ref-badge ${badgeClass}`;
-          span.style.cssText = style;
-          span.innerHTML = `${iconHtml}${escapeHtml(dec)}`;
-          branchesContainer.appendChild(span);
-        });
-      }
-    }
 
     if (files.length === 0) {
       detailStatsRow.innerHTML = '';
