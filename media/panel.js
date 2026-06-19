@@ -4,6 +4,8 @@
   // Elements
   const branchSelect = document.getElementById('branch-select');
   const authorSelect = document.getElementById('author-select');
+  const datePresetSelect = document.getElementById('date-preset-select');
+  const dateRangeGroup = document.querySelector('.date-range-group');
   const sinceDate = document.getElementById('since-date');
   const untilDate = document.getElementById('until-date');
   const searchInput = document.getElementById('search-input');
@@ -21,6 +23,9 @@
   const detailsContent = document.querySelector('.details-content');
   const detailHashBadge = document.getElementById('detail-hash-badge');
   const detailMergeBadge = document.getElementById('detail-merge-badge');
+  const detailAuthorAvatar = document.getElementById('detail-author-avatar');
+  const detailAuthorName = document.getElementById('detail-author-name');
+  const detailAuthorDate = document.getElementById('detail-author-date');
   const detailMsg = document.getElementById('detail-msg');
   const detailStatsRow = document.getElementById('detail-stats-row');
   const detailFilesTree = document.getElementById('detail-files-tree');
@@ -47,6 +52,7 @@
     const filters = {
       branch: branchSelect.value || undefined,
       author: authorSelect.value || undefined,
+      datePreset: datePresetSelect.value || undefined,
       since: sinceDate.value || undefined,
       until: untilDate.value || undefined,
       query: searchInput.value.trim() || undefined
@@ -77,22 +83,22 @@
   }
 
   // Settings
-  const rowHeight = 24;
+  const rowHeight = 28;
   const laneWidth = 12;
   const paddingLeft = 16;
   const colors = [
-    '#5cacee', // soft sky blue
-    '#66bb6a', // soft green
-    '#ff7043', // soft coral
-    '#ab47bc', // soft purple
-    '#26a69a', // soft teal
-    '#ffca28', // soft amber
-    '#ec407a', // soft pink
-    '#26c6da', // soft cyan
-    '#7e57c2', // soft violet
-    '#c8db58', // soft lime
-    '#8d6e63', // soft brown
-    '#78909c'  // soft blue-grey
+    '#3b82f6', // modern blue
+    '#10b981', // emerald green
+    '#f59e0b', // amber yellow
+    '#8b5cf6', // violet purple
+    '#ec4899', // pink
+    '#06b6d4', // cyan
+    '#f97316', // orange
+    '#14b8a6', // teal
+    '#a855f7', // purple
+    '#84cc16', // lime
+    '#6366f1', // indigo
+    '#ef4444'  // red
   ];
 
   // 文件扩展名 → codicon class + 颜色 class 映射
@@ -162,6 +168,33 @@
 
   // ── 请求/加载逻辑 ────────────────────────
 
+  function getFilters() {
+    let sinceVal = undefined;
+    let untilVal = undefined;
+
+    const preset = datePresetSelect.value;
+    if (preset === '24h') {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      sinceVal = d.toISOString().split('T')[0];
+    } else if (preset === '7d') {
+      const d = new Date();
+      d.setDate(d.getDate() - 7);
+      sinceVal = d.toISOString().split('T')[0];
+    } else if (preset === 'custom') {
+      sinceVal = sinceDate.value || undefined;
+      untilVal = untilDate.value || undefined;
+    }
+
+    return {
+      branch: branchSelect.value || undefined,
+      author: authorSelect.value || undefined,
+      since: sinceVal,
+      until: untilVal,
+      query: searchInput.value.trim() || undefined
+    };
+  }
+
   function reloadData() {
     currentPage = 0;
     hasMoreCommits = true;
@@ -170,13 +203,7 @@
     showLoading();
     errorBanner.classList.add('hidden');
     
-    const filters = {
-      branch: branchSelect.value || undefined,
-      author: authorSelect.value || undefined,
-      since: sinceDate.value || undefined,
-      until: untilDate.value || undefined,
-      query: searchInput.value.trim() || undefined
-    };
+    const filters = getFilters();
 
     vscode.postMessage({ command: 'loadData', filters, page: 0 });
   }
@@ -185,13 +212,7 @@
     if (isFetching || !hasMoreCommits) return;
     isFetching = true;
     
-    const filters = {
-      branch: branchSelect.value || undefined,
-      author: authorSelect.value || undefined,
-      since: sinceDate.value || undefined,
-      until: untilDate.value || undefined,
-      query: searchInput.value.trim() || undefined
-    };
+    const filters = getFilters();
 
     vscode.postMessage({ command: 'loadData', filters, page: currentPage + 1 });
   }
@@ -223,8 +244,14 @@
     if (previousState.filters) {
       branchSelect.value = previousState.filters.branch || '';
       authorSelect.value = previousState.filters.author || '';
+      datePresetSelect.value = previousState.filters.datePreset || '';
       sinceDate.value = previousState.filters.since || '';
       untilDate.value = previousState.filters.until || '';
+      if (datePresetSelect.value === 'custom') {
+        dateRangeGroup.classList.remove('hidden');
+      } else {
+        dateRangeGroup.classList.add('hidden');
+      }
       searchInput.value = previousState.filters.query || '';
     }
 
@@ -240,8 +267,25 @@
   }
 
   // 过滤器监听
-  branchSelect.addEventListener('change', reloadData);
-  authorSelect.addEventListener('change', reloadData);
+  branchSelect.addEventListener('change', () => {
+    adjustSelectWidth(branchSelect);
+    reloadData();
+  });
+  authorSelect.addEventListener('change', () => {
+    adjustSelectWidth(authorSelect);
+    reloadData();
+  });
+  datePresetSelect.addEventListener('change', () => {
+    adjustSelectWidth(datePresetSelect);
+    if (datePresetSelect.value === 'custom') {
+      dateRangeGroup.classList.remove('hidden');
+    } else {
+      dateRangeGroup.classList.add('hidden');
+      sinceDate.value = '';
+      untilDate.value = '';
+    }
+    reloadData();
+  });
   sinceDate.addEventListener('change', reloadData);
   untilDate.addEventListener('change', reloadData);
 
@@ -254,9 +298,12 @@
   resetBtn.addEventListener('click', () => {
     branchSelect.value = '';
     authorSelect.value = '';
+    datePresetSelect.value = '';
     sinceDate.value = '';
     untilDate.value = '';
+    dateRangeGroup.classList.add('hidden');
     searchInput.value = '';
+    updateSelectWidths();
     reloadData();
   });
 
@@ -304,6 +351,43 @@
       case 'focusCommit':
         focusAndHighlightCommit(message.hash);
         break;
+      case 'commitLocated':
+        hideLoading();
+        isFetching = false;
+
+        if (message.resetFilters) {
+          branchSelect.value = '';
+          authorSelect.value = '';
+          datePresetSelect.value = '';
+          sinceDate.value = '';
+          untilDate.value = '';
+          dateRangeGroup.classList.add('hidden');
+          searchInput.value = '';
+          updateSelectWidths();
+        }
+
+        commits = message.commits;
+        currentPage = Math.max(0, Math.ceil(commits.length / pageSize) - 1);
+        hasMoreCommits = message.commits.length >= pageSize;
+
+        branches = message.branches;
+        remoteBranches = message.remoteBranches || [];
+        authors = message.authors;
+
+        updateFilterControls();
+        renderTableAndGraph();
+        saveCurrentState();
+
+        setTimeout(() => {
+          let row = commitsTbody.querySelector(`tr.commit-row[data-hash^="${message.hash.substring(0, 7)}"]`);
+          if (row) {
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (selectedCommitHash !== row.dataset.hash) {
+              row.click();
+            }
+          }
+        }, 100);
+        break;
     }
   });
 
@@ -314,9 +398,42 @@
 
   // ── 过滤控件填充 ────────────────────────
 
+  function adjustSelectWidth(select) {
+    // 动态添加占位符置灰样式
+    if (select.value === "") {
+      select.classList.add('placeholder-selected');
+    } else {
+      select.classList.remove('placeholder-selected');
+    }
+
+    let measurer = document.getElementById('select-width-measurer');
+    if (!measurer) {
+      measurer = document.createElement('span');
+      measurer.id = 'select-width-measurer';
+      measurer.style.position = 'absolute';
+      measurer.style.visibility = 'hidden';
+      measurer.style.whiteSpace = 'pre';
+      measurer.style.fontFamily = select.style.fontFamily || 'var(--font-family)';
+      measurer.style.fontSize = '11px';
+      measurer.style.fontWeight = 'normal';
+      document.body.appendChild(measurer);
+    }
+    const selectedOption = select.options[select.selectedIndex];
+    measurer.textContent = selectedOption ? selectedOption.text : '';
+    const width = measurer.offsetWidth + 28;
+    select.style.width = `${width}px`;
+  }
+
+  function updateSelectWidths() {
+    adjustSelectWidth(branchSelect);
+    adjustSelectWidth(authorSelect);
+    adjustSelectWidth(datePresetSelect);
+  }
+
   function updateFilterControls() {
-    const currentBranchValue = branchSelect.value;
-    branchSelect.innerHTML = '<option value="">所有分支</option>';
+    const state = vscode.getState();
+    const currentBranchValue = branchSelect.value || (state && state.filters && state.filters.branch) || '';
+    branchSelect.innerHTML = '<option value="">分支</option>';
     branches.forEach(b => {
       const option = document.createElement('option');
       option.value = b;
@@ -325,8 +442,8 @@
       branchSelect.appendChild(option);
     });
 
-    const currentAuthorValue = authorSelect.value;
-    authorSelect.innerHTML = '<option value="">所有作者</option>';
+    const currentAuthorValue = authorSelect.value || (state && state.filters && state.filters.author) || '';
+    authorSelect.innerHTML = '<option value="">作者</option>';
     authors.forEach(a => {
       const option = document.createElement('option');
       option.value = a;
@@ -334,6 +451,8 @@
       if (a === currentAuthorValue) option.selected = true;
       authorSelect.appendChild(option);
     });
+
+    updateSelectWidths();
   }
 
   // ── 图表布局 & 渲染核心 ────────────────────────
@@ -620,16 +739,24 @@
           }
         }
 
+        // 列表页小头像计算
+        const authorColor = getAvatarColor(c.author);
+        const authorInitials = getInitials(c.author);
+        const authorAvatarHtml = `<span class="avatar-circle" style="background-color: ${authorColor}; width: 14px; height: 14px; font-size: 8px; margin-right: 5px; display: inline-flex; vertical-align: middle; line-height: 14px; border: none; box-shadow: none;">${authorInitials}</span>`;
+
         tr.innerHTML = `
           <td class="graph-col" style="width: ${computedGraphWidth}px; min-width: ${computedGraphWidth}px;"></td>
           <td class="content-col" colspan="4">
             <div class="row-content">
               <div class="commit-main">
                 <span class="commit-message" title="${escapeHtml(c.message)}">${escapeHtml(c.message)}</span>
+                ${decsHtml}
               </div>
               <div class="commit-meta">
-                <span class="commit-author" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</span>
-                ${decsHtml}
+                <span class="commit-author" title="${escapeHtml(c.author)}">
+                  ${authorAvatarHtml}
+                  <span style="vertical-align: middle;">${escapeHtml(c.author)}</span>
+                </span>
                 <span class="commit-date" title="${relTime}">${absTime}</span>
                 <span class="hash-copyable" data-full-hash="${c.hash}">${c.hash.substring(0, 7)}</span>
               </div>
@@ -759,7 +886,7 @@
       }
       
       path.setAttribute('stroke', color);
-      path.setAttribute('stroke-width', '1.8');
+      path.setAttribute('stroke-width', '2.2');
       path.setAttribute('fill', 'none');
 
       // GitLens Hover events
@@ -791,15 +918,15 @@
       
       // Merge commits are rendered as hollow circles (ring nodes)
       if (node.isMerge) {
-        circle.setAttribute('r', '4.5');
+        circle.setAttribute('r', '5.5');
         circle.setAttribute('fill', 'var(--bg-color)');
         circle.setAttribute('stroke', color);
-        circle.setAttribute('stroke-width', '2');
+        circle.setAttribute('stroke-width', '2.5');
       } else {
-        circle.setAttribute('r', '4');
+        circle.setAttribute('r', '4.5');
         circle.setAttribute('fill', color);
         circle.setAttribute('stroke', 'var(--bg-color)');
-        circle.setAttribute('stroke-width', '2');
+        circle.setAttribute('stroke-width', '2.5');
       }
 
       // GitLens Hover events
@@ -838,6 +965,16 @@
 
     detailHashBadge.textContent = hash.substring(0, 7);
     detailHashBadge.dataset.fullHash = hash;
+
+    // 动态渲染详情面板的作者信息及头像
+    if (detailAuthorName && detailAuthorDate && detailAuthorAvatar) {
+      detailAuthorName.textContent = `${commit.author} <${commit.email || ''}>`;
+      detailAuthorDate.textContent = `${formatDate(commit.timestamp)} (${getRelativeTime(commit.timestamp)})`;
+      
+      const initials = getInitials(commit.author);
+      detailAuthorAvatar.textContent = initials;
+      detailAuthorAvatar.style.backgroundColor = getAvatarColor(commit.author);
+    }
 
     // Render all branch badges in detail panel
     const branchesContainer = document.getElementById('detail-branches-container');
@@ -1060,14 +1197,18 @@
       if (f.deletions) deletedLines += parseInt(f.deletions, 10) || 0;
     });
 
-    let statsHtml = '<div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 4px;">';
-    statsHtml += '<div class="detail-stats" style="margin-left: 0; gap: 12px; font-size: 11px; display: flex; align-items: center;">';
-    statsHtml += `<span><strong>${filesChanged}</strong> 个文件改变</span>`;
-    if (addedLines > 0) statsHtml += `<span class="stat-add"><strong>+${addedLines}</strong> 行插入</span>`;
-    if (deletedLines > 0) statsHtml += `<span class="stat-delete"><strong>-${deletedLines}</strong> 行删除</span>`;
+    let statsHtml = '<div class="details-stats-card">';
+    statsHtml += '<div class="detail-stats-info">';
+    statsHtml += `<span class="stat-files-count"><i class="codicon codicon-files"></i> <strong>${filesChanged}</strong> 个文件已更改</span>`;
+    if (addedLines > 0 || deletedLines > 0) {
+      statsHtml += '<div class="stat-lines-delta" style="display: flex; gap: 8px; margin-top: 2px;">';
+      if (addedLines > 0) statsHtml += `<span class="stat-add" style="color: #4caf50; font-size: 10px;"><strong>+${addedLines}</strong> 行插入</span>`;
+      if (deletedLines > 0) statsHtml += `<span class="stat-delete" style="color: #f44336; font-size: 10px;"><strong>-${deletedLines}</strong> 行删除</span>`;
+      statsHtml += '</div>';
+    }
     statsHtml += '</div>';
     statsHtml += `
-      <button class="btn btn-secondary open-all-changes-btn" style="font-size: 11px; padding: 2px 6px; display: flex; align-items: center; gap: 4px;" title="打开当前提交的所有文件更改对比 (Multi Diff)">
+      <button class="btn btn-secondary open-all-changes-btn" title="打开当前提交的所有文件更改对比 (Multi Diff)">
         <i class="codicon codicon-diff"></i>
         <span>打开所有更改</span>
       </button>
@@ -1150,7 +1291,15 @@
         row.click();
       }
     } else {
-      showError(`在当前视图中未找到提交: ${hash.substring(0, 7)}`);
+      showLoading();
+      const filters = {
+        branch: branchSelect.value || undefined,
+        author: authorSelect.value || undefined,
+        since: sinceDate.value || undefined,
+        until: untilDate.value || undefined,
+        query: searchInput.value.trim() || undefined
+      };
+      vscode.postMessage({ command: 'locateCommit', hash, filters });
     }
   }
 

@@ -41,58 +41,127 @@ body {
 /* ── 过滤工具栏 ─────────────────────── */
 .filter-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 6px;
   align-items: center;
   padding: 6px 10px;
   background-color: rgba(255, 255, 255, 0.02);
   border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+}
+
+.filter-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .filter-group {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-color);
+  padding: 0 8px;
+  border-radius: 6px;
+  height: 28px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.filter-group:hover {
+  border-color: var(--vscode-inputOption-activeBorder, var(--text-link));
+  background-color: rgba(255, 255, 255, 0.015);
+}
+
+.filter-group:focus-within {
+  border-color: var(--text-link);
+  box-shadow: 0 0 0 1px var(--text-link);
+  background-color: var(--input-bg);
 }
 
 .filter-group label {
-  opacity: 0.6;
+  opacity: 0.7;
   display: flex;
   align-items: center;
+  color: var(--input-fg);
 }
 
 .filter-group label .codicon {
-  font-size: 14px;
+  font-size: 13px;
 }
 
-input, select {
-  background-color: var(--input-bg);
+.filter-group input, .filter-group select {
+  background: transparent !important;
+  border: none !important;
   color: var(--input-fg);
-  border: 1px solid var(--input-border);
-  padding: 3px 6px;
-  border-radius: 3px;
+  padding: 0 !important;
+  margin: 0;
+  height: 100%;
+  font-size: 12px;
   outline: none;
-  font-size: 11px;
-  transition: border-color 0.15s ease;
 }
 
-input:focus, select:focus {
-  border-color: var(--text-link);
+.filter-group select.placeholder-selected {
+  color: var(--vscode-input-placeholderForeground, rgba(255, 255, 255, 0.38)) !important;
 }
 
-input[type="date"] {
-  width: 105px;
+.filter-group select.placeholder-selected option {
+  color: var(--input-fg) !important;
+  background-color: var(--input-bg) !important;
+}
+
+.filter-group select {
+  cursor: pointer;
+  padding-right: 4px !important;
+  max-width: 160px;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+}
+
+.date-range-group {
+  gap: 6px;
+}
+
+.date-separator {
+  opacity: 0.5;
+  color: var(--input-fg);
+  font-size: 12px;
+}
+
+.filter-group input[type="date"] {
+  width: 110px;
   color-scheme: dark;
 }
 
 .search-group {
   flex-grow: 1;
-  min-width: 120px;
+  min-width: 140px;
 }
 
 .search-group input {
   width: 100%;
   box-sizing: border-box;
+}
+
+#reset-btn {
+  height: 28px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: transparent;
+  color: var(--fg-color);
+  transition: all 0.2s ease;
+}
+
+#reset-btn:hover {
+  background-color: var(--vscode-button-secondaryHoverBackground, rgba(255, 255, 255, 0.08));
+  border-color: var(--text-link);
+  color: var(--text-link);
 }
 
 /* ── 按钮 ─────────────────────── */
@@ -174,7 +243,7 @@ table#commits-table thead {
 
 table#commits-table td {
   padding: 0 8px;
-  height: 24px;
+  height: 28px;
   vertical-align: middle;
   border-bottom: none;
   white-space: nowrap;
@@ -205,7 +274,7 @@ table#commits-table td {
 .commit-main {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -218,7 +287,8 @@ table#commits-table td {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--fg-color);
+  color: var(--vscode-editor-foreground, var(--fg-color));
+  font-weight: 500;
 }
 
 .commit-meta {
@@ -231,12 +301,15 @@ table#commits-table td {
 }
 
 .commit-author {
-  width: 90px;
-  min-width: 90px;
-  max-width: 90px;
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.85;
 }
 
 .commit-date {
@@ -247,12 +320,13 @@ table#commits-table td {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0.7;
 }
 
 /* ── 行悬停与选中 ─────────────────────── */
 tr.commit-row {
   cursor: pointer;
-  transition: background-color 0.1s ease;
+  transition: background-color 0.15s ease;
 }
 
 tr.commit-row:hover {
@@ -264,32 +338,42 @@ tr.commit-row.selected {
 }
 
 tr.commit-row.selected td.content-col {
-  /* removed selection glow border color */
+  border-left: 3px solid var(--selection-glow-color, var(--vscode-button-background, #0e639c));
 }
 
 /* ── 点击复制 Hash ─────────────────────── */
 .hash-copyable {
-  width: 60px;
-  min-width: 60px;
-  max-width: 60px;
+  width: 58px;
+  min-width: 58px;
+  max-width: 58px;
   text-align: center;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 10px;
   cursor: pointer;
-  transition: color 0.15s ease;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 0;
+  transition: all 0.15s ease;
+  line-height: 14px;
+  box-sizing: border-box;
 }
 
 .hash-copyable:hover {
   color: var(--text-link);
-  text-decoration: underline;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--text-link);
+  text-decoration: none;
 }
 
 .hash-copied {
-  width: 60px;
-  min-width: 60px;
-  max-width: 60px;
+  width: 58px;
+  min-width: 58px;
+  max-width: 58px;
   text-align: center;
   color: var(--badge-original-bg, #10b981) !important;
+  background-color: rgba(16, 185, 129, 0.1) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
 }
 
 /* ── 相对时间 ─────────────────────── */
@@ -466,38 +550,44 @@ tr.detail-row td {
 
 .file-status-badge {
   font-size: 9px;
-  font-weight: bold;
-  padding: 1px 4px;
-  border-radius: 3px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 4px;
   margin-left: auto;
   text-align: center;
-  min-width: 10px;
+  min-width: 12px;
+  line-height: 1;
   opacity: 0.9;
 }
 
 .status-A {
-  background-color: rgba(76, 175, 80, 0.15);
+  background-color: rgba(76, 175, 80, 0.12);
   color: #4caf50;
+  border: 1px solid rgba(76, 175, 80, 0.2);
 }
 
 .status-M {
-  background-color: rgba(33, 150, 243, 0.15);
+  background-color: rgba(33, 150, 243, 0.12);
   color: #2196f3;
+  border: 1px solid rgba(33, 150, 243, 0.2);
 }
 
 .status-D {
-  background-color: rgba(244, 67, 54, 0.15);
+  background-color: rgba(244, 67, 54, 0.12);
   color: #f44336;
+  border: 1px solid rgba(244, 67, 54, 0.2);
 }
 
 .status-R {
-  background-color: rgba(255, 152, 0, 0.15);
+  background-color: rgba(255, 152, 0, 0.12);
   color: #ff9800;
+  border: 1px solid rgba(255, 152, 0, 0.2);
 }
 
 .status-C {
-  background-color: rgba(156, 39, 176, 0.15);
+  background-color: rgba(156, 39, 176, 0.12);
   color: #9c27b0;
+  border: 1px solid rgba(156, 39, 176, 0.2);
 }
 
 .folder-children.hidden {
@@ -683,10 +773,10 @@ tr.detail-row td {
 }
 
 .details-content {
-  padding: 12px 14px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   animation: slideDown 0.15s ease-out;
 }
 
@@ -695,7 +785,7 @@ tr.detail-row td {
   flex-direction: column;
   gap: 8px;
   border-bottom: 1px solid var(--border-color);
-  padding-bottom: 12px;
+  padding-bottom: 14px;
 }
 
 .details-commit-title {
@@ -734,13 +824,15 @@ tr.detail-row td {
 .details-author-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 4px 0;
+  margin-top: 4px;
 }
 
 .details-author-info {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 #detail-author-name {
@@ -752,27 +844,71 @@ tr.detail-row td {
 #detail-author-date {
   font-size: 11px;
   color: var(--desc-fg);
+  opacity: 0.8;
+}
+
+.details-stats-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background-color: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  margin-top: 8px;
+}
+
+.detail-stats-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-files-count {
+  font-size: 11px;
+  color: var(--fg-color);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.stat-files-count .codicon {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.stat-lines-delta {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.details-stats-card .open-all-changes-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-color);
+  background-color: transparent;
+  color: var(--fg-color);
+  transition: all 0.2s ease;
+}
+
+.details-stats-card .open-all-changes-btn:hover {
+  background-color: var(--vscode-button-secondaryHoverBackground, rgba(255, 255, 255, 0.08));
+  border-color: var(--text-link);
+  color: var(--text-link);
 }
 
 .details-files-section {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.files-header {
-  font-weight: 600;
-  font-size: 11px;
-  color: var(--desc-fg);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-bottom: 1px dashed var(--border-color);
-  padding-bottom: 4px;
-}
-
-#detail-stats-container {
-  margin-left: auto;
 }
 
 /* 头像圆圈 */

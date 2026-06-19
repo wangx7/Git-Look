@@ -1,11 +1,16 @@
 {
-  "name": "git-look",
-  "displayName": "Git Look",
-  "description": "Visual Git history graph & Code origin tracing tool",
+  "name": "git-visual",
+  "displayName": "Git 可视化",
+  "description": "选区历史、行作者、图谱",
   "version": "0.0.1",
-  "publisher": "git-look",
+  "publisher": "wangx123",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.75.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wangx7/Git-Look"
   },
   "categories": [
     "SCM Providers",
@@ -15,45 +20,54 @@
   "contributes": {
     "commands": [
       {
-        "command": "git-look.traceOrigin",
-        "title": "Git Look: 追溯代码源头 (Trace Code Origin)"
+        "command": "git-visual.traceOrigin",
+        "title": "Git 选区历史"
       },
       {
-        "command": "git-look.openWorkspaceFile",
-        "title": "Git Look: 转到当前文件 (Go to Current File)",
+        "command": "git-visual.toggleLineBlame",
+        "title": "Git 行作者"
+      },
+      {
+        "command": "git-visual.openWorkspaceFile",
+        "title": "Git 可视化: 转到当前文件",
         "icon": "$(go-to-file)"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "git-look.traceOrigin",
+          "command": "git-visual.traceOrigin",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "git-visual.toggleLineBlame",
           "group": "navigation",
           "when": "editorTextFocus"
         }
       ],
       "editor/title": [
         {
-          "command": "git-look.openWorkspaceFile",
+          "command": "git-visual.openWorkspaceFile",
           "group": "navigation",
-          "when": "resourceScheme == git-look"
+          "when": "resourceScheme == git-visual"
         }
       ]
     },
     "viewsContainers": {
       "panel": [
         {
-          "id": "git-look-panel",
-          "title": "Git Look",
+          "id": "git-visual-panel",
+          "title": "图谱",
           "icon": "$(graph)"
         }
       ]
     },
     "views": {
-      "git-look-panel": [
+      "git-visual-panel": [
         {
           "type": "webview",
-          "id": "git-look.graphView",
+          "id": "git-visual.graphView",
           "name": "Git Graph"
         }
       ]

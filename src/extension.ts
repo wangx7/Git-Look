@@ -2,8 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { GitGraphProvider } from './panel/gitGraphProvider';
-import { TraceTabProvider } from './panel/traceTabProvider';
-import { execGit, execGitBuffer } from './gitHelper';
+import { execGit, execGitBuffer, traceLineHistory } from './gitHelper';
+import { BlameAnnotationsManager } from './blameAnnotations';
 
 const TRANSPARENT_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
@@ -44,7 +44,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider(GitGraphProvider.viewType, gitGraphProvider)
   );
 
-  // 2. Register Custom FileSystemProvider for git-look scheme
+  // 2. Register Custom FileSystemProvider for git-visual scheme
   // Used by VS Code native diff editor to fetch old/new versions of files (including binary files)
   const fileSystemProvider = new class implements vscode.FileSystemProvider {
     private _onDidChangeFile = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
@@ -72,24 +72,62 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     async readFile(uri: vscode.Uri): Promise<Uint8Array> {
-      const cwd = getCwd();
+      const hash = uri.authority;
+      let filePath = uri.query;
+      if (!filePath) {
+        filePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
+        // Extract the real path if it contains " | " metadata separator
+        const parts = filePath.split(' | ');
+        if (parts.length > 1) {
+          filePath = parts[parts.length - 1];
+        }
+      }
+
+      let cwd = getCwd();
       if (!cwd) {
         throw vscode.FileSystemError.Unavailable('工作区未打开');
       }
-      
-      const hash = uri.authority;
-      const filePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
+
+      // 1. Resolve Git Root for the base workspace folder
+      let gitRoot = cwd;
+      try {
+        gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+      } catch (e) {
+        // Ignore
+      }
+
+      // 2. Resolve the absolute file path (resolve relative to gitRoot, not cwd, since git paths are repo-relative)
+      const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.resolve(gitRoot, filePath);
+
+      // 3. If the path is absolute, dynamically refine the cwd and gitRoot based on the file's location
+      if (path.isAbsolute(absoluteFilePath)) {
+        const fileUri = vscode.Uri.file(absoluteFilePath);
+        const folder = vscode.workspace.getWorkspaceFolder(fileUri);
+        if (folder) {
+          cwd = folder.uri.fsPath;
+        } else {
+          cwd = path.dirname(absoluteFilePath);
+        }
+        try {
+          gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+        } catch (e) {
+          gitRoot = cwd;
+        }
+      }
+
+      // 4. Compute path relative to the Git repository root
+      const repoFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
 
       if (hash === 'empty') {
-        return getEmptyContent(filePath);
+        return getEmptyContent(repoFilePath);
       }
 
       try {
-        return await execGitBuffer(['show', `${hash}:${filePath}`], cwd);
+        return await execGitBuffer(['show', `${hash}:${repoFilePath}`], cwd);
       } catch (err: any) {
         const errMsg = err.message || '';
         if (errMsg.includes('does not exist') || errMsg.includes('exists on disk, but not in') || errMsg.includes('fatal: path')) {
-          return getEmptyContent(filePath);
+          return getEmptyContent(repoFilePath);
         }
         throw vscode.FileSystemError.FileNotFound(uri);
       }
@@ -109,23 +147,23 @@ export function activate(context: vscode.ExtensionContext) {
   };
   
   context.subscriptions.push(
-    vscode.workspace.registerFileSystemProvider('git-look', fileSystemProvider, {
+    vscode.workspace.registerFileSystemProvider('git-visual', fileSystemProvider, {
       isCaseSensitive: true,
       isReadonly: true
     })
   );
 
-  // 3. Register Code Origin Tracing context command
-  const traceCommand = vscode.commands.registerCommand('git-look.traceOrigin', async () => {
+  // 3. Register Line History context command (Git 选区历史)
+  const traceCommand = vscode.commands.registerCommand('git-visual.traceOrigin', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      vscode.window.showWarningMessage('请在编辑器中打开一个代码文件以进行追溯！');
+      vscode.window.showWarningMessage('请在编辑器中打开一个代码文件以查看选区历史！');
       return;
     }
 
     const document = editor.document;
     if (document.isUntitled) {
-      vscode.window.showWarningMessage('无法追溯未保存的文件！');
+      vscode.window.showWarningMessage('无法查看未保存文件的选区历史！');
       return;
     }
 
@@ -142,26 +180,67 @@ export function activate(context: vscode.ExtensionContext) {
     const endLine = editor.selection.end.line + 1;
 
     try {
-      await TraceTabProvider.createOrShow(
-        context.extensionUri,
-        cwd,
-        filePath,
-        startLine,
-        endLine,
-        (hash) => {
-          // Highlight and focus the selected commit in bottom panel
-          gitGraphProvider.focusCommit(hash);
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: "正在获取 Git 选区历史...",
+        cancellable: false
+      }, async () => {
+        const commits = await traceLineHistory(cwd, filePath, startLine, endLine);
+        if (commits.length === 0) {
+          vscode.window.showInformationMessage('未找到该选区的历史记录');
+          return;
         }
-      );
+
+        const relativePath = path.relative(cwd, filePath).replace(/\\/g, '/');
+        const fileName = path.basename(filePath);
+
+        // Construct resourceList for vscode.changes Multi Diff Editor
+        const resourceList = commits.map(commit => {
+          const cleanMsg = commit.message.replace(/[\/\?#\\:\*]/g, ' ').trim();
+          const customPath = '/' + [
+            commit.hash.substring(0, 7),
+            commit.author,
+            cleanMsg,
+            filePath
+          ].join(' | ');
+
+          const leftUri = vscode.Uri.from({
+            scheme: 'git-visual',
+            authority: commit.parentHash || 'empty',
+            path: customPath
+          });
+
+          const rightUri = vscode.Uri.from({
+            scheme: 'git-visual',
+            authority: commit.hash,
+            path: customPath
+          });
+
+          return [rightUri, leftUri, rightUri];
+        });
+
+        const title = `Git 选区历史: ${fileName} (L${startLine}-L${endLine})`;
+        await vscode.commands.executeCommand('vscode.changes', title, resourceList);
+      });
     } catch (err: any) {
-      vscode.window.showErrorMessage(`追溯代码历史失败: ${err.message}`);
+      vscode.window.showErrorMessage(`获取选区历史失败: ${err.message}`);
     }
   });
 
   context.subscriptions.push(traceCommand);
 
+  // 3.5 Register Toggle Blame Annotations command (Git 行作者)
+  const blameAnnotationsManager = new BlameAnnotationsManager(getCwd);
+  context.subscriptions.push(blameAnnotationsManager);
+
+  const toggleBlameCommand = vscode.commands.registerCommand('git-visual.toggleLineBlame', async () => {
+    const editor = vscode.window.activeTextEditor;
+    await blameAnnotationsManager.toggle(editor);
+  });
+  context.subscriptions.push(toggleBlameCommand);
+
   // 4. Register Open Current Workspace File command
-  const openWorkspaceFileCommand = vscode.commands.registerCommand('git-look.openWorkspaceFile', async (uri: vscode.Uri) => {
+  const openWorkspaceFileCommand = vscode.commands.registerCommand('git-visual.openWorkspaceFile', async (uri: vscode.Uri) => {
     if (!uri) {
       const editor = vscode.window.activeTextEditor;
       if (editor) {
@@ -169,7 +248,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    if (!uri || uri.scheme !== 'git-look') {
+    if (!uri || uri.scheme !== 'git-visual') {
       return;
     }
 
@@ -186,8 +265,14 @@ export function activate(context: vscode.ExtensionContext) {
       // Ignore
     }
 
-    const relativePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
-    const fullPath = path.join(repoRoot, relativePath);
+    let relativePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
+    // Strip the " | " metadata separator if present
+    const parts = relativePath.split(' | ');
+    if (parts.length > 1) {
+      relativePath = parts[parts.length - 1];
+    }
+
+    const fullPath = path.isAbsolute(relativePath) ? relativePath : path.join(repoRoot, relativePath);
     const fileUri = vscode.Uri.file(fullPath);
 
     if (!fs.existsSync(fullPath)) {
@@ -204,9 +289,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(openWorkspaceFileCommand);
 
-  // 5. Blame status bar integration for git-look files
-  const outputChannel = vscode.window.createOutputChannel('Git Look');
-  outputChannel.appendLine('[Git-Look] Status bar blame integration initialized');
+  // 5. Blame status bar integration for git-visual files
+  const outputChannel = vscode.window.createOutputChannel('Git 可视化');
+  outputChannel.appendLine('[Git 可视化] Status bar blame integration initialized');
 
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   context.subscriptions.push(statusBarItem);
@@ -223,41 +308,59 @@ export function activate(context: vscode.ExtensionContext) {
 
   async function updateBlameStatusBar(editor: vscode.TextEditor | undefined) {
     if (!editor) {
-      outputChannel.appendLine('[Git-Look] updateBlameStatusBar: no active editor');
+      outputChannel.appendLine('[Git 可视化] updateBlameStatusBar: no active editor');
       statusBarItem.hide();
       return;
     }
 
-    outputChannel.appendLine(`[Git-Look] updateBlameStatusBar: active editor scheme = "${editor.document.uri.scheme}", path = "${editor.document.uri.path}"`);
+    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: active editor scheme = "${editor.document.uri.scheme}", path = "${editor.document.uri.path}"`);
 
-    if (editor.document.uri.scheme !== 'git-look') {
+    if (editor.document.uri.scheme !== 'git-visual') {
       statusBarItem.hide();
       return;
     }
 
     const uri = editor.document.uri;
     const commitHash = uri.authority;
-    outputChannel.appendLine(`[Git-Look] updateBlameStatusBar: commitHash = "${commitHash}"`);
+    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: commitHash = "${commitHash}"`);
     if (commitHash === 'empty') {
       statusBarItem.hide();
       return;
     }
 
-    const filePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
+    let filePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
+    // Extract the real path if it contains " | " metadata separator
+    const parts = filePath.split(' | ');
+    if (parts.length > 1) {
+      filePath = parts[parts.length - 1];
+    }
+
     const line = editor.selection.active.line + 1; // 1-based line number
     const cwd = getCwd();
-    outputChannel.appendLine(`[Git-Look] updateBlameStatusBar: line = ${line}, filePath = "${filePath}", cwd = "${cwd}"`);
+    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: line = ${line}, raw filePath = "${filePath}", cwd = "${cwd}"`);
     if (!cwd) {
       statusBarItem.hide();
       return;
     }
+
+    // Resolve Git root and compute repository-relative path
+    let gitRoot = cwd;
+    try {
+      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+    } catch (e) {
+      // Ignore
+    }
+
+    const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.resolve(gitRoot, filePath);
+    const repoFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
+    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: resolved gitRoot = "${gitRoot}", repoFilePath = "${repoFilePath}"`);
 
     const token = {};
     currentBlameToken = token;
 
     try {
       // Run git blame for that specific line at that commit
-      outputChannel.appendLine(`[Git-Look] Running: git blame -L ${line},${line} --porcelain ${commitHash} -- ${filePath}`);
+      outputChannel.appendLine(`[Git 可视化] Running: git blame -L ${line},${line} --porcelain ${commitHash} -- ${repoFilePath} (in ${gitRoot})`);
       const output = await execGit([
         'blame',
         '-L',
@@ -265,16 +368,16 @@ export function activate(context: vscode.ExtensionContext) {
         '--porcelain',
         commitHash,
         '--',
-        filePath
-      ], cwd);
+        repoFilePath
+      ], gitRoot);
 
       if (currentBlameToken !== token) {
-        outputChannel.appendLine('[Git-Look] updateBlameStatusBar: token mismatch (outdated request)');
+        outputChannel.appendLine('[Git 可视化] updateBlameStatusBar: token mismatch (outdated request)');
         return; // Outdated request
       }
 
       if (!output) {
-        outputChannel.appendLine('[Git-Look] updateBlameStatusBar: git blame returned empty output');
+        outputChannel.appendLine('[Git 可视化] updateBlameStatusBar: git blame returned empty output');
         statusBarItem.hide();
         return;
       }
@@ -282,7 +385,7 @@ export function activate(context: vscode.ExtensionContext) {
       // Parse porcelain output
       const lines = output.split('\n');
       if (lines.length < 4) {
-        outputChannel.appendLine('[Git-Look] updateBlameStatusBar: parsed output lines too short');
+        outputChannel.appendLine('[Git 可视化] updateBlameStatusBar: parsed output lines too short');
         statusBarItem.hide();
         return;
       }
@@ -315,14 +418,14 @@ export function activate(context: vscode.ExtensionContext) {
         
         statusBarItem.command = {
           title: '定位提交',
-          command: 'git-look.focusCommitFromBlame',
+          command: 'git-visual.focusCommitFromBlame',
           arguments: [blamedCommitHash]
         };
       }
-      outputChannel.appendLine(`[Git-Look] updateBlameStatusBar: showing status bar text: "${statusBarItem.text}"`);
+      outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: showing status bar text: "${statusBarItem.text}"`);
       statusBarItem.show();
     } catch (err: any) {
-      outputChannel.appendLine(`[Git-Look] updateBlameStatusBar error: ${err.message || err}`);
+      outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar error: ${err.message || err}`);
       if (currentBlameToken === token) {
         statusBarItem.hide();
       }
@@ -330,7 +433,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // Register focus commit command
-  const focusBlameCmd = vscode.commands.registerCommand('git-look.focusCommitFromBlame', (hash: string) => {
+  const focusBlameCmd = vscode.commands.registerCommand('git-visual.focusCommitFromBlame', (hash: string) => {
     gitGraphProvider.focusCommit(hash);
   });
   context.subscriptions.push(focusBlameCmd);

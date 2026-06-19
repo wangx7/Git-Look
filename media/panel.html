@@ -24,29 +24,36 @@
           <div class="filter-group">
             <label for="branch-select"><i class="codicon codicon-git-branch"></i></label>
             <select id="branch-select">
-              <option value="">所有分支</option>
+              <option value="">分支</option>
             </select>
           </div>
 
           <div class="filter-group">
             <label for="author-select"><i class="codicon codicon-person"></i></label>
             <select id="author-select">
-              <option value="">所有作者</option>
+              <option value="">作者</option>
             </select>
           </div>
 
-          <div class="filter-group">
-            <label for="since-date"><i class="codicon codicon-calendar"></i></label>
-            <input type="date" id="since-date" title="起始日期">
+          <div class="filter-group date-preset-group">
+            <label for="date-preset-select"><i class="codicon codicon-calendar"></i></label>
+            <select id="date-preset-select">
+              <option value="">时间</option>
+              <option value="24h">过去24小时</option>
+              <option value="7d">过去7天</option>
+              <option value="custom">自定义...</option>
+            </select>
           </div>
 
-          <div class="filter-group">
-            <label for="until-date">~</label>
+          <div class="filter-group date-range-group hidden">
+            <input type="date" id="since-date" title="起始日期">
+            <span class="date-separator">~</span>
             <input type="date" id="until-date" title="截止日期">
           </div>
 
           <div class="filter-group search-group">
-            <input type="text" id="search-input" placeholder="搜索提交消息或哈希...">
+            <label for="search-input"><i class="codicon codicon-search"></i></label>
+            <input type="text" id="search-input" placeholder="文本或哈希">
           </div>
 
           <button id="reset-btn" class="btn btn-secondary" title="重置所有过滤条件">
@@ -88,6 +95,13 @@
               </div>
               <div id="detail-branches-container" style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;"></div>
               <h2 id="detail-msg" style="margin-top: 6px;"></h2>
+            </div>
+            <div class="details-author-row" id="detail-author-row">
+              <span class="avatar-circle" id="detail-author-avatar"></span>
+              <div class="details-author-info">
+                <span id="detail-author-name"></span>
+                <span id="detail-author-date"></span>
+              </div>
             </div>
             <div class="details-stats-row" id="detail-stats-row">
               <!-- Stats will be populated here -->

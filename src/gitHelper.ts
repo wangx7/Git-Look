@@ -20,6 +20,7 @@ export interface DiffLine {
 
 export interface CommitDiff {
   hash: string;
+  parentHash: string;
   author: string;
   email: string;
   timestamp: number;
@@ -132,16 +133,8 @@ export async function getAuthors(cwd: string): Promise<string[]> {
   }
 }
 
-export async function getCommits(
-  cwd: string,
-  filters: GitFilters,
-  skip: number = 0,
-  limit: number = 150,
-  signal?: AbortSignal
-): Promise<CommitInfo[]> {
+function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string | null } {
   const args = ['log', '--topo-order'];
-  
-  // Custom format using ASCII 0x1f (unit separator) to prevent message delimiter issues
   args.push('--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%d%x1f%s');
 
   let searchHash: string | null = null;
@@ -149,16 +142,6 @@ export async function getCommits(
     const trimmed = filters.query.trim();
     if (/^[0-9a-fA-F]{7,40}$/.test(trimmed)) {
       searchHash = trimmed;
-    }
-  }
-
-  if (searchHash) {
-    try {
-      const output = await execGit(['show', '-s', '--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%d%x1f%s', searchHash], cwd, signal);
-      const parsed = parseCommitLine(output.trim());
-      return parsed ? [parsed] : [];
-    } catch {
-      // Fall back
     }
   }
 
@@ -187,6 +170,28 @@ export async function getCommits(
     args.push(`--grep=${filters.query}`, '-i');
   }
 
+  return { args, searchHash };
+}
+
+export async function getCommits(
+  cwd: string,
+  filters: GitFilters,
+  skip: number = 0,
+  limit: number = 150,
+  signal?: AbortSignal
+): Promise<CommitInfo[]> {
+  const { args, searchHash } = buildLogArgs(filters);
+
+  if (searchHash) {
+    try {
+      const output = await execGit(['show', '-s', '--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%d%x1f%s', searchHash], cwd, signal);
+      const parsed = parseCommitLine(output.trim());
+      return parsed ? [parsed] : [];
+    } catch {
+      // Fall back
+    }
+  }
+
   // Skip and Limit for Pagination
   args.push('-n', String(limit));
   if (skip > 0) {
@@ -205,6 +210,48 @@ export async function getCommits(
     }
     console.error('Error fetching commits:', e);
     return [];
+  }
+}
+
+export async function getCommitsUntil(
+  cwd: string,
+  filters: GitFilters,
+  targetHash: string,
+  maxLimit: number = 3000,
+  signal?: AbortSignal
+): Promise<{ commits: CommitInfo[]; found: boolean }> {
+  const { args, searchHash } = buildLogArgs(filters);
+  args.push('-n', String(maxLimit));
+
+  try {
+    const output = await execGit(args, cwd, signal);
+    const allCommits = output
+      .split('\n')
+      .map(line => parseCommitLine(line))
+      .filter((c): c is CommitInfo => c !== null);
+
+    const targetLower = targetHash.toLowerCase();
+    const index = allCommits.findIndex(c => c.hash.toLowerCase().startsWith(targetLower));
+
+    if (index !== -1) {
+      // Return commits up to and including the target commit, plus 50 more to show history context below it
+      const endSlice = Math.min(allCommits.length, index + 50);
+      return {
+        commits: allCommits.slice(0, endSlice),
+        found: true
+      };
+    }
+
+    return {
+      commits: [],
+      found: false
+    };
+  } catch (e: any) {
+    if (e.message === 'ABORTED') {
+      throw e;
+    }
+    console.error('Error in getCommitsUntil:', e);
+    return { commits: [], found: false };
   }
 }
 
@@ -255,7 +302,7 @@ export async function traceLineHistory(
     `${startLine},${endLine}:${filePath}`,
     '-w', // ignore whitespaces to skip formatting commits
     '--date=raw',
-    '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%an%x1f%ae%x1f%at%x1f%s'
+    '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s'
   ];
 
   try {
@@ -272,13 +319,17 @@ export async function traceLineHistory(
         }
         const parts = line.substring('COMMIT_START_LOOK\x1f'.length).split('\x1f');
         const hash = parts[0];
-        const author = parts[1];
-        const email = parts[2];
-        const timestamp = parseInt(parts[3], 10);
-        const message = parts.slice(4).join('\x1f');
+        const parentsStr = parts[1] || '';
+        const author = parts[2];
+        const email = parts[3];
+        const timestamp = parseInt(parts[4], 10);
+        const message = parts.slice(5).join('\x1f');
+
+        const parentHash = parentsStr.split(' ')[0] || 'empty';
 
         currentCommit = {
           hash,
+          parentHash,
           author,
           email,
           timestamp,

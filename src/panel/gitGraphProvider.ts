@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCommits, getBranches, getAuthors, execGit } from '../gitHelper';
+import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit } from '../gitHelper';
 
 export class GitGraphProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'git-look.graphView';
+  public static readonly viewType = 'git-visual.graphView';
   private _view?: vscode.WebviewView;
   private _abortController?: AbortController;
 
@@ -79,6 +79,60 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             webviewView.webview.postMessage({
               type: 'error',
               error: err.message || '获取 Git 数据失败'
+            });
+          }
+          break;
+        }
+        case 'locateCommit': {
+          try {
+            const { hash, filters } = data;
+            const cwd = this._getCwd();
+            if (!cwd) {
+              webviewView.webview.postMessage({ type: 'error', error: '未打开工作区或找不到项目目录' });
+              return;
+            }
+
+            // 1. Try to find the commit using current filters
+            let result = await getCommitsUntil(cwd, filters || {}, hash, 3000);
+            let resetFilters = false;
+
+            // 2. If not found, try with empty/default filters (all branches, no author/date/query)
+            if (!result.found) {
+              result = await getCommitsUntil(cwd, {}, hash, 3000);
+              if (result.found) {
+                resetFilters = true;
+              }
+            }
+
+            if (result.found) {
+              // Get branches and authors to keep dropdowns in sync
+              const [branches, remoteBranches, authors] = await Promise.all([
+                getBranches(cwd),
+                execGit(['branch', '-r', '--format=%(refname:short)'], cwd).then(out => 
+                  out.split('\n').map(b => b.trim()).filter(Boolean)
+                ).catch(() => []),
+                getAuthors(cwd)
+              ]);
+
+              webviewView.webview.postMessage({
+                type: 'commitLocated',
+                hash,
+                commits: result.commits,
+                branches,
+                remoteBranches,
+                authors,
+                resetFilters
+              });
+            } else {
+              webviewView.webview.postMessage({
+                type: 'error',
+                error: `在分支历史中未找到提交: ${hash.substring(0, 7)}`
+              });
+            }
+          } catch (err: any) {
+            webviewView.webview.postMessage({
+              type: 'error',
+              error: '定位提交失败: ' + err.message
             });
           }
           break;
@@ -183,12 +237,12 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           }
 
           const leftUri = vscode.Uri.from({
-            scheme: 'git-look',
+            scheme: 'git-visual',
             authority: parentHash || 'empty',
             path: file.startsWith('/') ? file : '/' + file
           });
           const rightUri = vscode.Uri.from({
-            scheme: 'git-look',
+            scheme: 'git-visual',
             authority: hash,
             path: file.startsWith('/') ? file : '/' + file
           });
@@ -200,11 +254,11 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         case 'openWorkspaceFile': {
           const { file } = data;
           const uri = vscode.Uri.from({
-            scheme: 'git-look',
+            scheme: 'git-visual',
             authority: 'empty',
             path: file.startsWith('/') ? file : '/' + file
           });
-          await vscode.commands.executeCommand('git-look.openWorkspaceFile', uri);
+          await vscode.commands.executeCommand('git-visual.openWorkspaceFile', uri);
           break;
         }
         case 'openAllDiffs': {
@@ -212,19 +266,19 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             const { hash, files, parentHash, message } = data;
             const resourceList = files.map((f: any) => {
               const leftUri = vscode.Uri.from({
-                scheme: 'git-look',
+                scheme: 'git-visual',
                 authority: parentHash || 'empty',
                 path: f.path.startsWith('/') ? f.path : '/' + f.path
               });
               const rightUri = vscode.Uri.from({
-                scheme: 'git-look',
+                scheme: 'git-visual',
                 authority: hash,
                 path: f.path.startsWith('/') ? f.path : '/' + f.path
               });
               return [rightUri, leftUri, rightUri];
             });
             const title = `${hash.substring(0, 7)} - ${message || ''} (${files.length} 个文件)`;
-            console.log(`[Git-Look] openAllDiffs: opening ${resourceList.length} changes with title "${title}"`);
+            console.log(`[Git 可视化] openAllDiffs: opening ${resourceList.length} changes with title "${title}"`);
             await vscode.commands.executeCommand('vscode.changes', title, resourceList);
           } catch (e: any) {
             vscode.window.showErrorMessage(`无法打开多文件对比: ${e.message}`);
