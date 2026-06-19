@@ -261,6 +261,7 @@
     if (selectedCommitHash) {
       vscode.postMessage({ command: 'getCommitDetail', hash: selectedCommitHash });
     }
+    vscode.postMessage({ command: 'initWatcher' });
   } else {
     // 初始加载
     reloadData();

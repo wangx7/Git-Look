@@ -7,6 +7,9 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'git-visual.graphView';
   private _view?: vscode.WebviewView;
   private _abortController?: AbortController;
+  private _currentGitDir?: string;
+  private _gitWatcher?: fs.FSWatcher;
+  private _debounceTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -19,6 +22,10 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
+
+    webviewView.onDidDispose(() => {
+      this._disposeGitWatcher();
+    });
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -38,7 +45,14 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
       }
 
       switch (data.command) {
+        case 'initWatcher': {
+          if (cwd) {
+            this._setupGitWatcher(cwd);
+          }
+          break;
+        }
         case 'loadData': {
+          this._setupGitWatcher(cwd);
           if (this._abortController) {
             this._abortController.abort();
           }
@@ -320,5 +334,87 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
       this._view.show(true); // Bring panel view to focus
       this._view.webview.postMessage({ type: 'focusCommit', hash });
     }
+  }
+
+  private _setupGitWatcher(cwd: string) {
+    this._resolveAndSetupWatcher(cwd);
+  }
+
+  private async _resolveAndSetupWatcher(cwd: string) {
+    try {
+      const gitDirRel = (await execGit(['rev-parse', '--git-dir'], cwd)).trim();
+      const gitDir = path.resolve(cwd, gitDirRel);
+
+      if (this._currentGitDir === gitDir) {
+        return; // Already watching this git directory
+      }
+
+      this._disposeGitWatcher();
+      this._currentGitDir = gitDir;
+
+      console.log(`[Git 可视化] Starting watcher for Git directory: ${gitDir}`);
+
+      try {
+        this._gitWatcher = fs.watch(gitDir, { recursive: true }, (eventType, filename) => {
+          if (filename) {
+            const normalized = filename.replace(/\\/g, '/');
+            if (normalized === 'HEAD' || normalized === 'index' || normalized.startsWith('refs/')) {
+              this._triggerDebouncedRefresh();
+            }
+          } else {
+            this._triggerDebouncedRefresh();
+          }
+        });
+      } catch (err) {
+        console.warn('[Git 可视化] Recursive fs.watch failed, falling back to non-recursive watches:', err);
+        const watchers: fs.FSWatcher[] = [];
+        const filesToWatch = ['HEAD', 'index'];
+        for (const file of filesToWatch) {
+          const filePath = path.join(gitDir, file);
+          if (fs.existsSync(filePath)) {
+            try {
+              watchers.push(fs.watch(filePath, () => this._triggerDebouncedRefresh()));
+            } catch (e) {}
+          }
+        }
+        const refsPath = path.join(gitDir, 'refs');
+        if (fs.existsSync(refsPath)) {
+          try {
+            watchers.push(fs.watch(refsPath, () => this._triggerDebouncedRefresh()));
+          } catch (e) {}
+        }
+        this._gitWatcher = {
+          close: () => {
+            watchers.forEach(w => w.close());
+          }
+        } as any;
+      }
+    } catch (e) {
+      console.error('[Git 可视化] Error setting up Git watcher:', e);
+    }
+  }
+
+  private _triggerDebouncedRefresh() {
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+    }
+    this._debounceTimer = setTimeout(() => {
+      console.log('[Git 可视化] Git change detected, refreshing graph...');
+      this.refresh();
+    }, 300);
+  }
+
+  private _disposeGitWatcher() {
+    if (this._gitWatcher) {
+      try {
+        this._gitWatcher.close();
+      } catch (e) {}
+      this._gitWatcher = undefined;
+    }
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = undefined;
+    }
+    this._currentGitDir = undefined;
   }
 }
