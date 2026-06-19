@@ -243,7 +243,9 @@
 
     if (previousState.filters) {
       branchSelect.value = previousState.filters.branch || '';
+      branchSelect.dataset.restoredValue = previousState.filters.branch || '';
       authorSelect.value = previousState.filters.author || '';
+      authorSelect.dataset.restoredValue = previousState.filters.author || '';
       datePresetSelect.value = previousState.filters.datePreset || '';
       sinceDate.value = previousState.filters.since || '';
       untilDate.value = previousState.filters.until || '';
@@ -432,8 +434,11 @@
   }
 
   function updateFilterControls() {
-    const state = vscode.getState();
-    const currentBranchValue = branchSelect.value || (state && state.filters && state.filters.branch) || '';
+    let currentBranchValue = branchSelect.value;
+    if (branchSelect.dataset.restoredValue !== undefined) {
+      currentBranchValue = branchSelect.dataset.restoredValue;
+      delete branchSelect.dataset.restoredValue;
+    }
     branchSelect.innerHTML = '<option value="">分支</option>';
     branches.forEach(b => {
       const option = document.createElement('option');
@@ -443,7 +448,11 @@
       branchSelect.appendChild(option);
     });
 
-    const currentAuthorValue = authorSelect.value || (state && state.filters && state.filters.author) || '';
+    let currentAuthorValue = authorSelect.value;
+    if (authorSelect.dataset.restoredValue !== undefined) {
+      currentAuthorValue = authorSelect.dataset.restoredValue;
+      delete authorSelect.dataset.restoredValue;
+    }
     authorSelect.innerHTML = '<option value="">作者</option>';
     authors.forEach(a => {
       const option = document.createElement('option');
