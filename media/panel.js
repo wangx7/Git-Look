@@ -84,7 +84,7 @@
   }
 
   // Settings
-  const rowHeight = 28;
+  const rowHeight = 32;
   const laneWidth = 12;
   const paddingLeft = 16;
   const colors = [
@@ -296,7 +296,11 @@
   let searchTimeout;
   searchInput.addEventListener('input', () => {
     clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(reloadData, 350);
+    searchInput.style.opacity = '0.55'; // 防抖等待期间给出视觉反馈
+    searchTimeout = setTimeout(() => {
+      searchInput.style.opacity = '';
+      reloadData();
+    }, 350);
   });
 
   resetBtn.addEventListener('click', () => {
@@ -383,7 +387,7 @@
         saveCurrentState();
 
         setTimeout(() => {
-          let row = commitsTbody.querySelector(`tr.commit-row[data-hash^="${message.hash.substring(0, 7)}"]`);
+          let row = commitsTbody.querySelector(`tr.commit-row[data-hash="${message.hash}"]`);
           if (row) {
             row.scrollIntoView({ behavior: 'smooth', block: 'center' });
             if (selectedCommitHash !== row.dataset.hash) {
@@ -491,13 +495,37 @@
       return;
     }
 
-    // ─── 1. 图表 Lane 分配算法（防重叠） ─────────
+    // ─── 1. 图表 Lane 分配算法（防重叠 · Map O(1) 优化版）─────────
 
     const commitHashes = new Set(commits.map(c => c.hash));
-    const lanes = [];         // lanes[i] = hash 占用该 lane 的 commit
-    const commitNodes = {};   // hash -> { row, lane }
-    const lines = [];         // 连线数据
+    // 构建 hash→commit O(1) 查找表，避免在主干识别循环中反复线性 find
+    const hashToCommitMap = new Map();
+    commits.forEach(c => hashToCommitMap.set(c.hash, c));
+
+    const lanes = [];             // lanes[i] = hash or null
+    const hashToLane = new Map(); // 反向映射：hash → laneIdx（O(1) 查找替代 indexOf）
+    const commitNodes = {};       // hash → { row, lane }
+    const lines = [];             // 连线数据
     let maxLanes = 0;
+
+    // lane 辅助函数（保持 lanes[] 与 hashToLane 严格同步）
+    function laneSet(idx, hash) {
+      const old = lanes[idx];
+      if (old != null) { hashToLane.delete(old); }
+      lanes[idx] = hash;
+      if (hash != null) { hashToLane.set(hash, idx); }
+    }
+    function laneIndexOf(hash) {
+      const idx = hashToLane.get(hash);
+      return idx !== undefined ? idx : -1;
+    }
+    function lanePushNull() { lanes.push(null); }
+    function lanePush(hash) {
+      const idx = lanes.length;
+      lanes.push(hash);
+      if (hash != null) { hashToLane.set(hash, idx); }
+      return idx;
+    }
 
     // 找出主干提交，强行绑定在 Lane 0 (主轴)
     const mainTrunk = new Set();
@@ -505,7 +533,7 @@
     let curr = headCommit ? headCommit.hash : (commits[0] ? commits[0].hash : null);
     while (curr) {
       mainTrunk.add(curr);
-      const c = commits.find(x => x.hash === curr);
+      const c = hashToCommitMap.get(curr); // O(1)，原先为 O(n) find
       curr = (c && c.parents && c.parents.length > 0) ? c.parents[0] : null;
     }
 
@@ -518,37 +546,31 @@
       const parents = c.parents;
       const isMerge = parents.length >= 2;
 
-      // 找到或分配 lane
-      let laneIdx = lanes.indexOf(hash);
+      // 找到或分配 lane（O(1) Map 查找）
+      let laneIdx = laneIndexOf(hash);
       if (laneIdx === -1) {
         if (mainTrunk.has(hash)) {
           laneIdx = 0;
           if (lanes.length === 0) {
-            lanes.push(hash);
+            lanePush(hash);
           } else {
-            lanes[0] = hash;
+            laneSet(0, hash);
           }
         } else {
-          // Search empty slot starting from lane 1 (reserve lane 0 for main trunk)
+          // 从 lane 1 开始找空槽（保留 lane 0 给主轴）
           let emptySlot = -1;
           for (let s = 1; s < lanes.length; s++) {
-            if (lanes[s] === null) {
-              emptySlot = s;
-              break;
-            }
+            if (lanes[s] === null) { emptySlot = s; break; }
           }
           if (emptySlot !== -1) {
             laneIdx = emptySlot;
-            lanes[laneIdx] = hash;
+            laneSet(laneIdx, hash);
           } else {
-            // Allocate new lane
             if (lanes.length === 0) {
-              lanes.push(null); // Lane 0 reserved
-              lanes.push(hash); // Lane 1
-              laneIdx = 1;
+              lanePushNull(); // Lane 0 保留给主轴
+              laneIdx = lanePush(hash); // Lane 1
             } else {
-              laneIdx = lanes.length;
-              lanes.push(hash);
+              laneIdx = lanePush(hash);
             }
           }
         }
@@ -567,26 +589,27 @@
       const incomingLanes = [...lanes];
 
       // 释放当前 lane
-      lanes[laneIdx] = null;
+      laneSet(laneIdx, null);
 
       // 处理父节点
       if (parents.length > 0) {
         // 主父节点
         const p0 = parents[0];
         if (commitHashes.has(p0)) {
-          const p0LaneIdx = lanes.indexOf(p0);
+          const p0LaneIdx = laneIndexOf(p0); // O(1)
           let targetLaneIdx = laneIdx;
-          
+
           if (p0LaneIdx !== -1) {
             targetLaneIdx = p0LaneIdx;
           } else {
             if (mainTrunk.has(p0)) {
-              if (lanes[0] === null) {
-                lanes[0] = p0;
+              if (lanes[0] == null) {
+                laneSet(0, p0);
               }
               targetLaneIdx = 0;
             } else {
-              lanes[laneIdx] = p0;
+              laneSet(laneIdx, p0);
+              targetLaneIdx = laneIdx;
             }
           }
 
@@ -607,31 +630,28 @@
         for (let p = 1; p < parents.length; p++) {
           const pk = parents[p];
           if (commitHashes.has(pk)) {
-            const pkLaneIdx = lanes.indexOf(pk);
+            const pkLaneIdx = laneIndexOf(pk); // O(1)
             let pkTargetLaneIdx = pkLaneIdx;
 
             if (pkLaneIdx === -1) {
               if (mainTrunk.has(pk)) {
                 pkTargetLaneIdx = 0;
-                if (lanes[0] === null) {
-                  lanes[0] = pk;
+                if (lanes[0] == null) {
+                  laneSet(0, pk);
                 }
               } else {
-                // 不复用已占用的 slot，防重叠 (从 lane 1 开始找)
+                // 不复用已占用的 slot，防重叠（从 lane 1 开始找）
                 let emptySlot = -1;
                 for (let s = 1; s < lanes.length; s++) {
-                  if (lanes[s] === null && s !== laneIdx) {
-                    emptySlot = s;
-                    break;
-                  }
+                  if (lanes[s] === null && s !== laneIdx) { emptySlot = s; break; }
                 }
                 if (emptySlot === -1) {
                   pkTargetLaneIdx = lanes.length === 0 ? 1 : lanes.length;
-                  while (lanes.length < pkTargetLaneIdx) lanes.push(null);
-                  lanes.push(pk);
+                  while (lanes.length < pkTargetLaneIdx) { lanePushNull(); }
+                  lanePush(pk);
                 } else {
                   pkTargetLaneIdx = emptySlot;
-                  lanes[emptySlot] = pk;
+                  laneSet(emptySlot, pk);
                 }
               }
             }
@@ -657,7 +677,7 @@
       for (let j = 0; j < incomingLanes.length; j++) {
         const h = incomingLanes[j];
         if (h && j !== laneIdx) {
-          const nextLaneIdx = lanes.indexOf(h);
+          const nextLaneIdx = laneIndexOf(h); // O(1)
           if (nextLaneIdx !== -1) {
             lines.push({
               fromRow: r, fromLane: j,
@@ -668,7 +688,7 @@
         }
       }
 
-      // 清理尾部空 lanes
+      // 清理尾部空 lanes（null 不在 Map 中，无需额外清理）
       while (lanes.length > 0 && lanes[lanes.length - 1] === null) {
         lanes.pop();
       }
@@ -746,7 +766,8 @@
           decsHtml += makeBadge(firstDec);
 
           if (c.decorations.length > 1) {
-            decsHtml += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="还有 ${c.decorations.length - 1} 个分支在详情中展示">+${c.decorations.length - 1}</span>`;
+            const remainingNames = c.decorations.slice(1).join(', ');
+            decsHtml += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="${escapeHtml(remainingNames)}">+${c.decorations.length - 1}</span>`;
           }
         }
 
@@ -833,6 +854,16 @@
       }
     } else {
       collapseDetail();
+    }
+
+    // 底部「已加载全部」提示（当无更多提交时显示）
+    const existingFooter = commitsTbody.querySelector('.commits-end-footer');
+    if (existingFooter) { existingFooter.remove(); }
+    if (!hasMoreCommits && commits.length > 0) {
+      const footerTr = document.createElement('tr');
+      footerTr.className = 'commits-end-footer';
+      footerTr.innerHTML = `<td colspan="5" style="text-align:center;padding:10px 0 12px;opacity:0.35;font-size:11px;user-select:none;pointer-events:none;">· 已加载全部 ${commits.length} 条提交记录 ·</td>`;
+      commitsTbody.appendChild(footerTr);
     }
 
     // SVG 尺寸
@@ -1348,7 +1379,7 @@
   }
 
   function focusAndHighlightCommit(hash) {
-    let row = commitsTbody.querySelector(`tr.commit-row[data-hash^="${hash.substring(0, 7)}"]`);
+    let row = commitsTbody.querySelector(`tr.commit-row[data-hash="${hash}"]`);
     if (row) {
       row.scrollIntoView({ behavior: 'smooth', block: 'center' });
       if (selectedCommitHash !== row.dataset.hash) {

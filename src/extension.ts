@@ -349,9 +349,16 @@ export function activate(context: vscode.ExtensionContext) {
     updateBlameStatusBar(editor);
   }, null, context.subscriptions);
 
+  let blameSelectionDebounce: ReturnType<typeof setTimeout> | undefined;
   vscode.window.onDidChangeTextEditorSelection(event => {
     if (event.textEditor === vscode.window.activeTextEditor) {
-      updateBlameStatusBar(event.textEditor);
+      if (blameSelectionDebounce) {
+        clearTimeout(blameSelectionDebounce);
+      }
+      // 防抖 300ms，避免光标每次移动都触发 git blame 子进程
+      blameSelectionDebounce = setTimeout(() => {
+        updateBlameStatusBar(event.textEditor);
+      }, 300);
     }
   }, null, context.subscriptions);
 

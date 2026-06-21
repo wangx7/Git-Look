@@ -2,7 +2,7 @@
   "name": "git-visual",
   "displayName": "Git 可视化",
   "description": "选区历史、行作者、图谱",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "wangx123",
   "icon": "icon.png",
   "engines": {

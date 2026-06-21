@@ -75,7 +75,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
               execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out => 
                 out.split('\n').map(b => b.trim()).filter(Boolean)
               ).catch(() => []),
-              getAuthors(gitRoot),
+              getAuthors(gitRoot, signal),
               getCommits(gitRoot, data.filters || {}, skip, pageSize, signal)
             ]);
 
@@ -127,7 +127,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
                   out.split('\n').map(b => b.trim()).filter(Boolean)
                 ).catch(() => []),
                 getAuthors(gitRoot)
-              ]);
+              ]); // locateCommit 不传 signal，使其能独立完成
 
               webviewView.webview.postMessage({
                 type: 'commitLocated',

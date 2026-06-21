@@ -53,11 +53,12 @@
 
           <div class="filter-group search-group">
             <label for="search-input"><i class="codicon codicon-search"></i></label>
-            <input type="text" id="search-input" placeholder="文本或哈希">
+            <input type="text" id="search-input" placeholder="搜索消息或哈希">
           </div>
 
-          <button id="reset-btn" class="btn btn-secondary" title="重置所有过滤条件">
+          <button id="reset-btn" title="重置所有过滤条件">
             <i class="codicon codicon-clear-all"></i>
+            <span>重置</span>
           </button>
         </div>
 
@@ -80,34 +81,35 @@
       <!-- Resizer handle -->
       <div id="resizer-bar" class="resizer-bar"></div>
 
-      <!-- Right Pane: Commit Details (IntelliJ Style) -->
+      <!-- Right Pane: Commit Details -->
       <div class="details-pane empty">
         <div class="details-placeholder">
           <i class="codicon codicon-git-commit"></i>
-          <span>选择一次提交查看详细信息</span>
+          <span>选择一次提交<br>查看详细信息</span>
         </div>
         <div class="details-content hidden">
           <div class="details-header-section">
             <div class="details-meta-row">
               <span class="detail-author-info-compact">
                 <span class="avatar-circle" id="detail-author-avatar"></span>
-                <span id="detail-author-name" class="detail-author-name"></span>
+                <span class="detail-author-text">
+                  <span id="detail-author-name" class="detail-author-name"></span>
+                  <span id="detail-author-date" class="detail-author-date"></span>
+                </span>
               </span>
-              <span id="detail-author-date" class="detail-author-date"></span>
-              <div style="flex-grow: 1;"></div>
               <div class="details-hash-group">
                 <span id="detail-hash-badge" class="detail-hash-copyable" title="点击复制哈希"></span>
                 <span id="detail-merge-badge" class="ref-badge badge-merge hidden">合并</span>
               </div>
             </div>
-            
+
             <div id="detail-branches-container" class="detail-branches-container hidden"></div>
-            
+
             <div class="details-message-container">
               <div id="detail-msg-subject" class="detail-msg-subject"></div>
               <div id="detail-msg-body" class="detail-msg-body hidden"></div>
             </div>
-            
+
             <div class="details-stats-row" id="detail-stats-row">
               <!-- Stats will be populated here -->
             </div>

@@ -116,9 +116,9 @@ export async function getBranches(cwd: string): Promise<string[]> {
   }
 }
 
-export async function getAuthors(cwd: string): Promise<string[]> {
+export async function getAuthors(cwd: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    const output = await execGit(['log', '-n', '10000', '--pretty=format:%an'], cwd);
+    const output = await execGit(['log', '-n', '10000', '--pretty=format:%an'], cwd, signal);
     const authorsSet = new Set<string>();
     output.split('\n').forEach(name => {
       const trimmed = name.trim();

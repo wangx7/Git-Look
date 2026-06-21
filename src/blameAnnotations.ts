@@ -37,8 +37,16 @@ export class BlameAnnotationsManager implements vscode.Disposable {
     // Listen to editor changes and document saves
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(editor => {
-        if (this.enabled && editor) {
-          this.updateAnnotations(editor);
+        if (this.enabled) {
+          // 先清除所有其他可见编辑器的装饰，避免切换后旧注解残留
+          for (const visibleEditor of vscode.window.visibleTextEditors) {
+            if (visibleEditor !== editor) {
+              visibleEditor.setDecorations(this.decorationType, []);
+            }
+          }
+          if (editor) {
+            this.updateAnnotations(editor);
+          }
         }
       })
     );
