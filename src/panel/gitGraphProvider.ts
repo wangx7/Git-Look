@@ -248,17 +248,20 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             // Ignore and fall back to default
           }
 
+          // Use absolute file path with the built-in git scheme so VSCode can correctly
+          // render binary files (images, etc.) via the vscode.git extension.
+          const absoluteFilePath = path.join(gitRoot, file);
           const leftUri = vscode.Uri.from({
-            scheme: 'git-visual',
-            authority: parentHash || 'empty',
-            path: file.startsWith('/') ? file : '/' + file
+            scheme: 'git',
+            path: absoluteFilePath,
+            query: JSON.stringify({ path: absoluteFilePath, ref: parentHash || 'empty' })
           });
           const rightUri = vscode.Uri.from({
-            scheme: 'git-visual',
-            authority: hash,
-            path: file.startsWith('/') ? file : '/' + file
+            scheme: 'git',
+            path: absoluteFilePath,
+            query: JSON.stringify({ path: absoluteFilePath, ref: hash })
           });
-          const title = `${path.basename(file)} (${hash.substring(0, 7)} vs ${parentHash && parentHash !== 'empty' ? parentHash.substring(0, 7) : 'empty'})`;
+          const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
           
           await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
           break;
@@ -277,15 +280,17 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           try {
             const { hash, files, parentHash, message } = data;
             const resourceList = files.map((f: any) => {
+              // Use absolute file path with the built-in git scheme so binary files (images) render correctly.
+              const absoluteFilePath = path.join(gitRoot, f.path);
               const leftUri = vscode.Uri.from({
-                scheme: 'git-visual',
-                authority: parentHash || 'empty',
-                path: f.path.startsWith('/') ? f.path : '/' + f.path
+                scheme: 'git',
+                path: absoluteFilePath,
+                query: JSON.stringify({ path: absoluteFilePath, ref: parentHash || 'empty' })
               });
               const rightUri = vscode.Uri.from({
-                scheme: 'git-visual',
-                authority: hash,
-                path: f.path.startsWith('/') ? f.path : '/' + f.path
+                scheme: 'git',
+                path: absoluteFilePath,
+                query: JSON.stringify({ path: absoluteFilePath, ref: hash })
               });
               return [rightUri, leftUri, rightUri];
             });
