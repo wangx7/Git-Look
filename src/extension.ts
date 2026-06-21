@@ -5,21 +5,7 @@ import { GitGraphProvider } from './panel/gitGraphProvider';
 import { execGit, execGitBuffer, traceLineHistory } from './gitHelper';
 import { BlameAnnotationsManager } from './blameAnnotations';
 
-const TRANSPARENT_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-  'base64'
-);
 
-function getEmptyContent(filePath: string): Uint8Array {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === '.svg') {
-    return Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>', 'utf8');
-  }
-  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.tiff'].includes(ext)) {
-    return TRANSPARENT_PNG;
-  }
-  return new Uint8Array(0);
-}
 
 export function activate(context: vscode.ExtensionContext) {
   // Helper to get active workspace folder CWD
@@ -42,115 +28,6 @@ export function activate(context: vscode.ExtensionContext) {
   const gitGraphProvider = new GitGraphProvider(context.extensionUri, getCwd);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(GitGraphProvider.viewType, gitGraphProvider)
-  );
-
-  // 2. Register Custom FileSystemProvider for git-visual scheme
-  // Used by VS Code native diff editor to fetch old/new versions of files (including binary files)
-  const fileSystemProvider = new class implements vscode.FileSystemProvider {
-    private _onDidChangeFile = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
-    readonly onDidChangeFile = this._onDidChangeFile.event;
-
-    watch(uri: vscode.Uri, options: { readonly recursive: boolean; readonly excludes: readonly string[]; }): vscode.Disposable {
-      return new vscode.Disposable(() => {});
-    }
-
-    stat(uri: vscode.Uri): vscode.FileStat {
-      return {
-        type: vscode.FileType.File,
-        ctime: 0,
-        mtime: 0,
-        size: 0
-      };
-    }
-
-    readDirectory(uri: vscode.Uri): [string, vscode.FileType][] {
-      return [];
-    }
-
-    createDirectory(uri: vscode.Uri): void {
-      throw vscode.FileSystemError.NoPermissions('Readonly');
-    }
-
-    async readFile(uri: vscode.Uri): Promise<Uint8Array> {
-      const hash = uri.authority;
-      let filePath = uri.query;
-      if (!filePath) {
-        filePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
-        // Extract the real path if it contains " | " metadata separator
-        const parts = filePath.split(' | ');
-        if (parts.length > 1) {
-          filePath = parts[parts.length - 1];
-        }
-      }
-
-      let cwd = getCwd();
-      if (!cwd) {
-        throw vscode.FileSystemError.Unavailable('工作区未打开');
-      }
-
-      // 1. Resolve Git Root for the base workspace folder
-      let gitRoot = cwd;
-      try {
-        gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-      } catch (e) {
-        // Ignore
-      }
-
-      // 2. Resolve the absolute file path (resolve relative to gitRoot, not cwd, since git paths are repo-relative)
-      const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.resolve(gitRoot, filePath);
-
-      // 3. If the path is absolute, dynamically refine the cwd and gitRoot based on the file's location
-      if (path.isAbsolute(absoluteFilePath)) {
-        const fileUri = vscode.Uri.file(absoluteFilePath);
-        const folder = vscode.workspace.getWorkspaceFolder(fileUri);
-        if (folder) {
-          cwd = folder.uri.fsPath;
-        } else {
-          cwd = path.dirname(absoluteFilePath);
-        }
-        try {
-          gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-        } catch (e) {
-          gitRoot = cwd;
-        }
-      }
-
-      // 4. Compute path relative to the Git repository root
-      const repoFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
-
-      if (hash === 'empty') {
-        return getEmptyContent(repoFilePath);
-      }
-
-      try {
-        return await execGitBuffer(['show', `${hash}:${repoFilePath}`], cwd);
-      } catch (err: any) {
-        const errMsg = err.message || '';
-        if (errMsg.includes('does not exist') || errMsg.includes('exists on disk, but not in') || errMsg.includes('fatal: path')) {
-          return getEmptyContent(repoFilePath);
-        }
-        throw vscode.FileSystemError.FileNotFound(uri);
-      }
-    }
-
-    writeFile(uri: vscode.Uri, content: Uint8Array, options: { readonly create: boolean; readonly overwrite: boolean; }): void {
-      throw vscode.FileSystemError.NoPermissions('Readonly');
-    }
-
-    delete(uri: vscode.Uri, options: { readonly recursive: boolean; }): void {
-      throw vscode.FileSystemError.NoPermissions('Readonly');
-    }
-
-    rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { readonly overwrite: boolean; }): void {
-      throw vscode.FileSystemError.NoPermissions('Readonly');
-    }
-  };
-  
-  context.subscriptions.push(
-    vscode.workspace.registerFileSystemProvider('git-visual', fileSystemProvider, {
-      isCaseSensitive: true,
-      isReadonly: true
-    })
   );
 
   // 3. Register Line History context command (Git 选区历史)
@@ -196,27 +73,43 @@ export function activate(context: vscode.ExtensionContext) {
 
         // Construct resourceList for vscode.changes Multi Diff Editor
         const resourceList = commits.map(commit => {
+          const absoluteFilePath = filePath;
+          const leftUri = vscode.Uri.from({
+            scheme: 'git',
+            path: absoluteFilePath,
+            query: JSON.stringify({
+              path: absoluteFilePath,
+              ref: commit.parentHash || 'empty'
+            })
+          });
+
+          const rightUri = vscode.Uri.from({
+            scheme: 'git',
+            path: absoluteFilePath,
+            query: JSON.stringify({
+              path: absoluteFilePath,
+              ref: commit.hash
+            })
+          });
+
           const cleanMsg = commit.message.replace(/[\/\?#\\:\*]/g, ' ').trim();
           const customPath = '/' + [
             commit.hash.substring(0, 7),
             commit.author,
             cleanMsg,
-            filePath
+            path.basename(filePath)
           ].join(' | ');
 
-          const leftUri = vscode.Uri.from({
-            scheme: 'git-visual',
-            authority: commit.parentHash || 'empty',
-            path: customPath
+          const labelUri = vscode.Uri.from({
+            scheme: 'git',
+            path: customPath,
+            query: JSON.stringify({
+              path: absoluteFilePath,
+              ref: commit.hash
+            })
           });
 
-          const rightUri = vscode.Uri.from({
-            scheme: 'git-visual',
-            authority: commit.hash,
-            path: customPath
-          });
-
-          return [rightUri, leftUri, rightUri];
+          return [rightUri, leftUri, labelUri];
         });
 
         const title = `Git 选区历史: ${fileName} (L${startLine}-L${endLine})`;
@@ -248,7 +141,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    if (!uri || uri.scheme !== 'git-visual') {
+    if (!uri || uri.scheme !== 'git') {
       return;
     }
 
@@ -265,11 +158,20 @@ export function activate(context: vscode.ExtensionContext) {
       // Ignore
     }
 
-    let relativePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
-    // Strip the " | " metadata separator if present
-    const parts = relativePath.split(' | ');
-    if (parts.length > 1) {
-      relativePath = parts[parts.length - 1];
+    let relativePath = '';
+    if (uri.scheme === 'git') {
+      try {
+        const queryObj = JSON.parse(uri.query);
+        relativePath = queryObj.path;
+      } catch (e) {
+        relativePath = uri.path;
+      }
+    } else {
+      relativePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
+      const parts = relativePath.split(' | ');
+      if (parts.length > 1) {
+        relativePath = parts[parts.length - 1];
+      }
     }
 
     const fullPath = path.isAbsolute(relativePath) ? relativePath : path.join(repoRoot, relativePath);
@@ -315,24 +217,28 @@ export function activate(context: vscode.ExtensionContext) {
 
     outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: active editor scheme = "${editor.document.uri.scheme}", path = "${editor.document.uri.path}"`);
 
-    if (editor.document.uri.scheme !== 'git-visual') {
+    if (editor.document.uri.scheme !== 'git') {
       statusBarItem.hide();
       return;
     }
 
     const uri = editor.document.uri;
-    const commitHash = uri.authority;
-    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: commitHash = "${commitHash}"`);
-    if (commitHash === 'empty') {
-      statusBarItem.hide();
-      return;
+    let commitHash = '';
+    let filePath = '';
+    if (uri.scheme === 'git') {
+      try {
+        const queryObj = JSON.parse(uri.query);
+        commitHash = queryObj.ref;
+        filePath = queryObj.path;
+      } catch (e) {
+        // Fallback
+      }
     }
 
-    let filePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
-    // Extract the real path if it contains " | " metadata separator
-    const parts = filePath.split(' | ');
-    if (parts.length > 1) {
-      filePath = parts[parts.length - 1];
+    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: commitHash = "${commitHash}"`);
+    if (!commitHash || commitHash === 'empty') {
+      statusBarItem.hide();
+      return;
     }
 
     const line = editor.selection.active.line + 1; // 1-based line number

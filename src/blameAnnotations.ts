@@ -93,8 +93,19 @@ export class BlameAnnotationsManager implements vscode.Disposable {
     const filePath = document.uri.fsPath;
 
     try {
+      // Resolve Git Root
+      let gitRoot = cwd;
+      try {
+        gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+      } catch (e) {
+        // Ignore
+      }
+
+      // Compute Relative Path
+      const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
+
       // Run git blame with porcelain output
-      const output = await execGit(['blame', '--porcelain', filePath], cwd);
+      const output = await execGit(['blame', '--porcelain', repoFilePath], gitRoot);
       if (!this.enabled || vscode.window.activeTextEditor !== editor) {
         return; // User toggled off or switched editor during async git call
       }

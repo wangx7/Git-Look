@@ -296,17 +296,26 @@ export async function traceLineHistory(
   endLine: number,
   signal?: AbortSignal
 ): Promise<CommitDiff[]> {
+  let gitRoot = cwd;
+  try {
+    gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+  } catch (e) {
+    // Ignore
+  }
+
+  const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
+
   const args = [
     'log',
     `-L`,
-    `${startLine},${endLine}:${filePath}`,
+    `${startLine},${endLine}:${repoFilePath}`,
     '-w', // ignore whitespaces to skip formatting commits
     '--date=raw',
     '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s'
   ];
 
   try {
-    const output = await execGit(args, cwd, signal);
+    const output = await execGit(args, gitRoot, signal);
     const lines = output.split('\n');
     const commits: CommitDiff[] = [];
     let currentCommit: CommitDiff | null = null;

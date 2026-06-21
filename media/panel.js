@@ -26,7 +26,8 @@
   const detailAuthorAvatar = document.getElementById('detail-author-avatar');
   const detailAuthorName = document.getElementById('detail-author-name');
   const detailAuthorDate = document.getElementById('detail-author-date');
-  const detailMsg = document.getElementById('detail-msg');
+  const detailMsgSubject = document.getElementById('detail-msg-subject');
+  const detailMsgBody = document.getElementById('detail-msg-body');
   const detailStatsRow = document.getElementById('detail-stats-row');
   const detailFilesTree = document.getElementById('detail-files-tree');
 
@@ -960,7 +961,11 @@
       return;
     }
 
-    collapseDetail();
+    // 取消之前选中行的样式，不触发全面面板折叠
+    const previouslySelected = commitsTbody.querySelector('tr.commit-row.selected');
+    if (previouslySelected) {
+      previouslySelected.classList.remove('selected');
+    }
 
     selectedCommitHash = hash;
     saveCurrentState();
@@ -969,17 +974,22 @@
     const commit = commits.find(c => c.hash === hash);
     if (!commit) return;
 
-    detailsPane.classList.remove('empty');
-    detailsPlaceholder.classList.add('hidden');
-    detailsContent.classList.remove('hidden');
+    // 仅在原先处于空状态时，才显示详情框并触发 slideDown 动画
+    if (detailsContent.classList.contains('hidden')) {
+      detailsPane.classList.remove('empty');
+      detailsPlaceholder.classList.add('hidden');
+      detailsContent.classList.remove('hidden');
+    }
 
     detailHashBadge.textContent = hash.substring(0, 7);
     detailHashBadge.dataset.fullHash = hash;
 
     // 动态渲染详情面板的作者信息及头像
     if (detailAuthorName && detailAuthorDate && detailAuthorAvatar) {
-      detailAuthorName.textContent = `${commit.author} <${commit.email || ''}>`;
-      detailAuthorDate.textContent = `${formatDate(commit.timestamp)} (${getRelativeTime(commit.timestamp)})`;
+      detailAuthorName.textContent = commit.author;
+      detailAuthorName.title = commit.email || '';
+      detailAuthorDate.textContent = getRelativeTime(commit.timestamp);
+      detailAuthorDate.title = formatDate(commit.timestamp);
       
       const initials = getInitials(commit.author);
       detailAuthorAvatar.textContent = initials;
@@ -991,6 +1001,7 @@
     if (branchesContainer) {
       branchesContainer.innerHTML = '';
       if (commit.decorations && commit.decorations.length > 0) {
+        branchesContainer.classList.remove('hidden');
         commit.decorations.forEach(dec => {
           let badgeClass = 'badge-branch';
           let iconHtml = '<i class="codicon codicon-git-branch"></i>';
@@ -1022,6 +1033,8 @@
           span.innerHTML = `${iconHtml}${escapeHtml(dec)}`;
           branchesContainer.appendChild(span);
         });
+      } else {
+        branchesContainer.classList.add('hidden');
       }
     }
 
@@ -1042,20 +1055,55 @@
       });
     };
 
-    detailMsg.textContent = commit.message;
+    const msg = commit.message || '';
+    const firstLineEnd = msg.indexOf('\n');
+    let subject = msg;
+    let body = '';
+    if (firstLineEnd !== -1) {
+      subject = msg.substring(0, firstLineEnd);
+      body = msg.substring(firstLineEnd + 1).trim();
+    }
+
+    if (detailMsgSubject) {
+      detailMsgSubject.textContent = subject;
+    }
+    if (detailMsgBody) {
+      if (body) {
+        detailMsgBody.textContent = body;
+        detailMsgBody.classList.remove('hidden');
+      } else {
+        detailMsgBody.classList.add('hidden');
+      }
+    }
 
     detailStatsRow.innerHTML = '';
-    detailFilesTree.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 8px; padding: 10px;">
-        <div class="spinner" style="width:14px; height:14px; border-width: 2px;"></div>
-        <span style="opacity: 0.5; font-size: 11px;">获取文件列表...</span>
-      </div>
-    `;
+    
+    // 立即清空旧文件树，并重置透明度
+    detailFilesTree.innerHTML = '';
+    detailFilesTree.style.opacity = '1';
+
+    // 设置延迟加载提示定时器，如果 150ms 内获取到结果则不显示 "获取文件列表..."，避免闪烁
+    if (window.pendingFileLoadTimeout) {
+      clearTimeout(window.pendingFileLoadTimeout);
+    }
+    window.pendingFileLoadTimeout = setTimeout(() => {
+      detailFilesTree.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px; padding: 10px;">
+          <div class="spinner" style="width:14px; height:14px; border-width: 2px;"></div>
+          <span style="opacity: 0.5; font-size: 11px;">获取文件列表...</span>
+        </div>
+      `;
+    }, 150);
 
     vscode.postMessage({ command: 'getCommitDetail', hash });
   }
 
   function collapseDetail() {
+    if (window.pendingFileLoadTimeout) {
+      clearTimeout(window.pendingFileLoadTimeout);
+      window.pendingFileLoadTimeout = null;
+    }
+
     const previouslySelected = commitsTbody.querySelector('tr.commit-row.selected');
     if (previouslySelected) {
       previouslySelected.classList.remove('selected');
@@ -1186,6 +1234,12 @@
   function renderCommitDetail(hash, files) {
     if (selectedCommitHash !== hash) return;
 
+    if (window.pendingFileLoadTimeout) {
+      clearTimeout(window.pendingFileLoadTimeout);
+      window.pendingFileLoadTimeout = null;
+    }
+    detailFilesTree.style.opacity = '1';
+
     const row = commitsTbody.querySelector(`tr.commit-row[data-hash="${hash}"]`);
     if (!row) return;
     const parents = JSON.parse(row.dataset.parents);
@@ -1207,20 +1261,20 @@
       if (f.deletions) deletedLines += parseInt(f.deletions, 10) || 0;
     });
 
-    let statsHtml = '<div class="details-stats-card">';
-    statsHtml += '<div class="detail-stats-info">';
-    statsHtml += `<span class="stat-files-count"><i class="codicon codicon-files"></i> <strong>${filesChanged}</strong> 个文件已更改</span>`;
+    let statsHtml = '<div class="details-stats-toolbar">';
+    statsHtml += '<div class="stats-left">';
+    statsHtml += `<i class="codicon codicon-files" title="文件更改数"></i>`;
+    statsHtml += `<span class="stats-count-badge" title="已更改文件数">${filesChanged}</span>`;
     if (addedLines > 0 || deletedLines > 0) {
-      statsHtml += '<div class="stat-lines-delta" style="display: flex; gap: 8px; margin-top: 2px;">';
-      if (addedLines > 0) statsHtml += `<span class="stat-add" style="color: #4caf50; font-size: 10px;"><strong>+${addedLines}</strong> 行插入</span>`;
-      if (deletedLines > 0) statsHtml += `<span class="stat-delete" style="color: #f44336; font-size: 10px;"><strong>-${deletedLines}</strong> 行删除</span>`;
-      statsHtml += '</div>';
+      statsHtml += `<span class="stats-divider">|</span>`;
+      if (addedLines > 0) statsHtml += `<span class="stats-diff-badge add" title="插入行数">+${addedLines}</span>`;
+      if (deletedLines > 0) statsHtml += `<span class="stats-diff-badge delete" title="删除行数">-${deletedLines}</span>`;
     }
     statsHtml += '</div>';
     statsHtml += `
-      <button class="btn btn-secondary open-all-changes-btn" title="打开当前提交的所有文件更改对比 (Multi Diff)">
+      <button class="open-all-changes-btn compact-btn" title="打开当前提交的所有文件更改对比 (Multi Diff)">
         <i class="codicon codicon-diff"></i>
-        <span>打开所有更改</span>
+        <span>对比全部</span>
       </button>
     `;
     statsHtml += '</div>';

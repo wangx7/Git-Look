@@ -88,21 +88,26 @@
         </div>
         <div class="details-content hidden">
           <div class="details-header-section">
-            <div class="details-commit-title">
-              <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+            <div class="details-meta-row">
+              <span class="detail-author-info-compact">
+                <span class="avatar-circle" id="detail-author-avatar"></span>
+                <span id="detail-author-name" class="detail-author-name"></span>
+              </span>
+              <span id="detail-author-date" class="detail-author-date"></span>
+              <div style="flex-grow: 1;"></div>
+              <div class="details-hash-group">
                 <span id="detail-hash-badge" class="detail-hash-copyable" title="点击复制哈希"></span>
                 <span id="detail-merge-badge" class="ref-badge badge-merge hidden">合并</span>
               </div>
-              <div id="detail-branches-container" style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;"></div>
-              <h2 id="detail-msg" style="margin-top: 6px;"></h2>
             </div>
-            <div class="details-author-row" id="detail-author-row">
-              <span class="avatar-circle" id="detail-author-avatar"></span>
-              <div class="details-author-info">
-                <span id="detail-author-name"></span>
-                <span id="detail-author-date"></span>
-              </div>
+            
+            <div id="detail-branches-container" class="detail-branches-container hidden"></div>
+            
+            <div class="details-message-container">
+              <div id="detail-msg-subject" class="detail-msg-subject"></div>
+              <div id="detail-msg-body" class="detail-msg-body hidden"></div>
             </div>
+            
             <div class="details-stats-row" id="detail-stats-row">
               <!-- Stats will be populated here -->
             </div>

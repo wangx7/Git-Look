@@ -44,15 +44,21 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      // Resolve Git Root
+      let gitRoot = cwd;
+      try {
+        gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+      } catch (e) {
+        // Ignore
+      }
+
       switch (data.command) {
         case 'initWatcher': {
-          if (cwd) {
-            this._setupGitWatcher(cwd);
-          }
+          this._setupGitWatcher(gitRoot);
           break;
         }
         case 'loadData': {
-          this._setupGitWatcher(cwd);
+          this._setupGitWatcher(gitRoot);
           if (this._abortController) {
             this._abortController.abort();
           }
@@ -65,12 +71,12 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             const skip = page * pageSize;
 
             const [branches, remoteBranches, authors, commits] = await Promise.all([
-              getBranches(cwd),
-              execGit(['branch', '-r', '--format=%(refname:short)'], cwd, signal).then(out => 
+              getBranches(gitRoot),
+              execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out => 
                 out.split('\n').map(b => b.trim()).filter(Boolean)
               ).catch(() => []),
-              getAuthors(cwd),
-              getCommits(cwd, data.filters || {}, skip, pageSize, signal)
+              getAuthors(gitRoot),
+              getCommits(gitRoot, data.filters || {}, skip, pageSize, signal)
             ]);
 
             if (signal.aborted) {
@@ -100,19 +106,14 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         case 'locateCommit': {
           try {
             const { hash, filters } = data;
-            const cwd = this._getCwd();
-            if (!cwd) {
-              webviewView.webview.postMessage({ type: 'error', error: '未打开工作区或找不到项目目录' });
-              return;
-            }
 
             // 1. Try to find the commit using current filters
-            let result = await getCommitsUntil(cwd, filters || {}, hash, 3000);
+            let result = await getCommitsUntil(gitRoot, filters || {}, hash, 3000);
             let resetFilters = false;
 
             // 2. If not found, try with empty/default filters (all branches, no author/date/query)
             if (!result.found) {
-              result = await getCommitsUntil(cwd, {}, hash, 3000);
+              result = await getCommitsUntil(gitRoot, {}, hash, 3000);
               if (result.found) {
                 resetFilters = true;
               }
@@ -121,11 +122,11 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             if (result.found) {
               // Get branches and authors to keep dropdowns in sync
               const [branches, remoteBranches, authors] = await Promise.all([
-                getBranches(cwd),
-                execGit(['branch', '-r', '--format=%(refname:short)'], cwd).then(out => 
+                getBranches(gitRoot),
+                execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot).then(out => 
                   out.split('\n').map(b => b.trim()).filter(Boolean)
                 ).catch(() => []),
-                getAuthors(cwd)
+                getAuthors(gitRoot)
               ]);
 
               webviewView.webview.postMessage({
@@ -155,8 +156,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           try {
             // Get files changed in this commit including additions/deletions and handling merge commits (-m)
             const [statusOut, numstatOut] = await Promise.all([
-              execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', '-m', '--root', data.hash], cwd),
-              execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', data.hash], cwd)
+              execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', '-m', '--root', data.hash], gitRoot),
+              execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', data.hash], gitRoot)
             ]);
 
             const fileStatusMap = new Map<string, string>();
@@ -200,54 +201,51 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           const { file, hash } = data;
           let parentHash = data.parentHash;
 
-          const cwd = this._getCwd();
-          if (cwd) {
-            try {
-              const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], cwd)).trim();
-              const parents = parentsStr ? parentsStr.split(/\s+/) : [];
-              if (parents.length > 0) {
-                // Check if file exists in the current commit
-                let existsInCurrent = false;
-                try {
-                  await execGit(['cat-file', '-e', `${hash}:${file}`], cwd);
-                  existsInCurrent = true;
-                } catch (e) {
-                  // File does not exist in current commit (deleted)
-                }
-
-                if (existsInCurrent) {
-                  // If it exists in the current commit, check if it exists in the primary parent
-                  let existsInPrimaryParent = false;
-                  try {
-                    await execGit(['cat-file', '-e', `${parents[0]}:${file}`], cwd);
-                    existsInPrimaryParent = true;
-                  } catch (e) {
-                    // File does not exist in primary parent (added)
-                  }
-
-                  if (existsInPrimaryParent) {
-                    parentHash = parents[0];
-                  } else {
-                    parentHash = 'empty';
-                  }
-                } else {
-                  // If it does not exist in current commit (deleted), find which parent contains it
-                  let foundParent = '';
-                  for (const parent of parents) {
-                    try {
-                      await execGit(['cat-file', '-e', `${parent}:${file}`], cwd);
-                      foundParent = parent;
-                      break;
-                    } catch (e) {
-                      // File does not exist in this parent
-                    }
-                  }
-                  parentHash = foundParent || 'empty';
-                }
+          try {
+            const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], gitRoot)).trim();
+            const parents = parentsStr ? parentsStr.split(/\s+/) : [];
+            if (parents.length > 0) {
+              // Check if file exists in the current commit
+              let existsInCurrent = false;
+              try {
+                await execGit(['cat-file', '-e', `${hash}:${file}`], gitRoot);
+                existsInCurrent = true;
+              } catch (e) {
+                // File does not exist in current commit (deleted)
               }
-            } catch (e) {
-              // Ignore and fall back to default
+
+              if (existsInCurrent) {
+                // If it exists in the current commit, check if it exists in the primary parent
+                let existsInPrimaryParent = false;
+                try {
+                  await execGit(['cat-file', '-e', `${parents[0]}:${file}`], gitRoot);
+                  existsInPrimaryParent = true;
+                } catch (e) {
+                  // File does not exist in primary parent (added)
+                }
+
+                if (existsInPrimaryParent) {
+                  parentHash = parents[0];
+                } else {
+                  parentHash = 'empty';
+                }
+              } else {
+                // If it does not exist in current commit (deleted), find which parent contains it
+                let foundParent = '';
+                for (const parent of parents) {
+                  try {
+                    await execGit(['cat-file', '-e', `${parent}:${file}`], gitRoot);
+                    foundParent = parent;
+                    break;
+                  } catch (e) {
+                    // File does not exist in this parent
+                  }
+                }
+                parentHash = foundParent || 'empty';
+              }
             }
+          } catch (e) {
+            // Ignore and fall back to default
           }
 
           const leftUri = vscode.Uri.from({
