@@ -36,6 +36,39 @@ export interface GitFilters {
   query?: string;
 }
 
+export interface ContributorStat {
+  author: string;
+  email: string;
+  commits: number;
+  additions: number;
+  deletions: number;
+  totalChanged: number; // additions + deletions
+  weekdayDistribution: number[]; // [Mon(1)..Sun(0)], index 0=Sun,1=Mon,...,6=Sat
+  topFiles: FileStat[]; // per-author most-modified files
+}
+
+export interface DailyActivity {
+  date: string; // YYYY-MM-DD
+  count: number;
+}
+
+export interface FileStat {
+  path: string;
+  changes: number; // number of commits touching this file
+}
+
+export interface CodeStats {
+  totalCommits: number;
+  totalAdditions: number;
+  totalDeletions: number;
+  totalChanged: number;
+  contributors: ContributorStat[];
+  dailyActivity: DailyActivity[];
+  topFiles: FileStat[];
+  sinceDate: string;
+  untilDate: string;
+}
+
 let gitPathCache: string | undefined = undefined;
 
 async function getGitPath(): Promise<string> {
@@ -118,7 +151,7 @@ export async function getBranches(cwd: string): Promise<string[]> {
 
 export async function getAuthors(cwd: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    const output = await execGit(['log', '-n', '10000', '--pretty=format:%an'], cwd, signal);
+    const output = await execGit(['log', '--all', '-n', '10000', '--pretty=format:%an'], cwd, signal);
     const authorsSet = new Set<string>();
     output.split('\n').forEach(name => {
       const trimmed = name.trim();
@@ -162,7 +195,11 @@ function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string
     args.push(`--since=${filters.since}`);
   }
   if (filters.until) {
-    args.push(`--until=${filters.until}`);
+    let untilVal = filters.until;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(untilVal)) {
+      untilVal += ' 23:59:59';
+    }
+    args.push(`--until=${untilVal}`);
   }
 
   // Text search filter
@@ -386,3 +423,140 @@ export async function traceLineHistory(
   }
 }
 
+export async function getCodeStats(
+  cwd: string,
+  filters: GitFilters,
+  signal?: AbortSignal
+): Promise<CodeStats> {
+  // Default time window: last 100 days if no date range specified
+  const effectiveSince = filters.since || (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 100);
+    return d.toISOString().split('T')[0];
+  })();
+  const effectiveUntil = filters.until || new Date().toISOString().split('T')[0];
+  let effectiveUntilVal = effectiveUntil;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(effectiveUntilVal)) {
+    effectiveUntilVal += ' 23:59:59';
+  }
+
+  const args = ['log', '--no-merges', '--numstat',
+    '--pretty=format:COMMIT_STAT|%H|%an|%ae|%at'];
+
+  if (filters.branch) {
+    args.push(filters.branch);
+  } else {
+    args.push('--all');
+  }
+  if (filters.author) {
+    args.push(`--author=${filters.author}`);
+  }
+  args.push(`--since=${effectiveSince}`, `--until=${effectiveUntilVal}`);
+
+  const output = await execGit(args, cwd, signal);
+  const lines = output.split('\n');
+
+  const authorMap = new Map<string, {
+    email: string;
+    commits: number;
+    additions: number;
+    deletions: number;
+    weekdays: number[];
+    fileMap: Map<string, number>;
+  }>();
+  const dailyMap = new Map<string, number>();
+  const fileMap = new Map<string, number>();
+
+  let currentAuthor = '';
+  let currentEmail = '';
+  let currentTs = 0;
+
+  for (const line of lines) {
+    if (line.startsWith('COMMIT_STAT|')) {
+      const parts = line.split('|');
+      currentAuthor = parts[2];
+      currentEmail = parts[3];
+      currentTs = parseInt(parts[4], 10);
+
+      if (!authorMap.has(currentAuthor)) {
+        authorMap.set(currentAuthor, {
+          email: currentEmail,
+          commits: 0,
+          additions: 0,
+          deletions: 0,
+          weekdays: [0, 0, 0, 0, 0, 0, 0],
+          fileMap: new Map()
+        });
+      }
+      const entry = authorMap.get(currentAuthor)!;
+      entry.commits++;
+
+      const d = new Date(currentTs * 1000);
+      entry.weekdays[d.getDay()]++;
+      const dateStr = d.toISOString().split('T')[0];
+      dailyMap.set(dateStr, (dailyMap.get(dateStr) || 0) + 1);
+
+    } else if (line.trim() && currentAuthor) {
+      const tabParts = line.split('\t');
+      if (tabParts.length >= 3) {
+        const adds = tabParts[0] === '-' ? 0 : (parseInt(tabParts[0], 10) || 0);
+        const dels = tabParts[1] === '-' ? 0 : (parseInt(tabParts[1], 10) || 0);
+        const filePath = tabParts[2];
+
+        const entry = authorMap.get(currentAuthor)!;
+        entry.additions += adds;
+        entry.deletions += dels;
+
+        if (filePath) {
+          fileMap.set(filePath, (fileMap.get(filePath) || 0) + 1);
+          entry.fileMap.set(filePath, (entry.fileMap.get(filePath) || 0) + 1);
+        }
+      }
+    }
+  }
+
+  const contributors: ContributorStat[] = Array.from(authorMap.entries())
+    .map(([author, s]) => ({
+      author,
+      email: s.email,
+      commits: s.commits,
+      additions: s.additions,
+      deletions: s.deletions,
+      totalChanged: s.additions + s.deletions,
+      weekdayDistribution: s.weekdays,
+      topFiles: Array.from(s.fileMap.entries())
+        .map(([p, changes]) => ({ path: p, changes }))
+        .sort((a, b) => b.changes - a.changes)
+        .slice(0, 8)
+    }))
+    .sort((a, b) => b.totalChanged - a.totalChanged);
+
+  const totalCommits = contributors.reduce((s, c) => s + c.commits, 0);
+  const totalAdditions = contributors.reduce((s, c) => s + c.additions, 0);
+  const totalDeletions = contributors.reduce((s, c) => s + c.deletions, 0);
+
+  const dailyActivity: DailyActivity[] = [];
+  const startD = new Date(effectiveSince + 'T00:00:00');
+  const endD = new Date(effectiveUntil + 'T00:00:00');
+  for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().split('T')[0];
+    dailyActivity.push({ date: dateStr, count: dailyMap.get(dateStr) || 0 });
+  }
+
+  const topFiles: FileStat[] = Array.from(fileMap.entries())
+    .map(([p, changes]) => ({ path: p, changes }))
+    .sort((a, b) => b.changes - a.changes)
+    .slice(0, 10);
+
+  return {
+    totalCommits,
+    totalAdditions,
+    totalDeletions,
+    totalChanged: totalAdditions + totalDeletions,
+    contributors,
+    dailyActivity,
+    topFiles,
+    sinceDate: effectiveSince,
+    untilDate: effectiveUntil
+  };
+}

@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit } from '../gitHelper';
+import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats } from '../gitHelper';
 
 export class GitGraphProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'git-visual.graphView';
   private _view?: vscode.WebviewView;
   private _abortController?: AbortController;
+  private _statsAbortController?: AbortController;
   private _currentGitDir?: string;
   private _gitWatcher?: fs.FSWatcher;
   private _debounceTimer?: NodeJS.Timeout;
@@ -267,13 +268,42 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'openWorkspaceFile': {
-          const { file } = data;
+          const { file, hash } = data;
+          // If no hash provided (e.g. from top-files list), open the workspace file directly
+          if (!hash) {
+            const fullPath = path.join(gitRoot, file);
+            const fileUri = vscode.Uri.file(fullPath);
+            try {
+              await vscode.commands.executeCommand('vscode.open', fileUri);
+            } catch (err: any) {
+              vscode.window.showWarningMessage(`无法打开文件: ${err.message}`);
+            }
+            break;
+          }
+          // Otherwise open via the registered command (supports git-blame status bar integration)
           const uri = vscode.Uri.from({
             scheme: 'git-visual',
             authority: 'empty',
             path: file.startsWith('/') ? file : '/' + file
           });
           await vscode.commands.executeCommand('git-visual.openWorkspaceFile', uri);
+          break;
+        }
+        case 'getStats': {
+          // Use a SEPARATE abort controller — never touch _abortController (used by loadData)
+          if (this._statsAbortController) {
+            this._statsAbortController.abort();
+          }
+          this._statsAbortController = new AbortController();
+          const statsSignal = this._statsAbortController.signal;
+          try {
+            const stats = await getCodeStats(gitRoot, data.filters || {}, statsSignal);
+            if (statsSignal.aborted) { return; }
+            webviewView.webview.postMessage({ type: 'statsLoaded', stats });
+          } catch (err: any) {
+            if (err.message === 'ABORTED') { return; }
+            webviewView.webview.postMessage({ type: 'statsError', error: err.message });
+          }
           break;
         }
         case 'openAllDiffs': {

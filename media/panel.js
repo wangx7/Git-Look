@@ -17,10 +17,10 @@
   const tableContainer = document.querySelector('.list-pane');
 
   // Details Pane Elements
-  const detailsPane = document.querySelector('.details-pane');
+  const detailsPane = document.getElementById('details-pane');
   const resizerBar = document.getElementById('resizer-bar');
-  const detailsPlaceholder = document.querySelector('.details-placeholder');
-  const detailsContent = document.querySelector('.details-content');
+  const detailsPlaceholder = document.getElementById('details-placeholder');
+  const detailsContent = document.getElementById('details-content');
   const detailHashBadge = document.getElementById('detail-hash-badge');
   const detailMergeBadge = document.getElementById('detail-merge-badge');
   const detailAuthorAvatar = document.getElementById('detail-author-avatar');
@@ -30,6 +30,34 @@
   const detailMsgBody = document.getElementById('detail-msg-body');
   const detailStatsRow = document.getElementById('detail-stats-row');
   const detailFilesTree = document.getElementById('detail-files-tree');
+
+  // Stats Elements
+  const statsStrip = document.getElementById('stats-strip');
+  const stripCommitsVal = document.getElementById('strip-commits-val');
+  const stripAdd = document.getElementById('strip-add');
+  const stripDel = document.getElementById('strip-del');
+  const stripContributorsVal = document.getElementById('strip-contributors-val');
+  const stripRange = document.getElementById('strip-range');
+  const statsToggleBtn = document.getElementById('stats-toggle-btn');
+  const overviewStats = document.getElementById('overview-stats');
+  const overviewRange = document.getElementById('overview-range');
+  const ovCommits = document.getElementById('ov-commits');
+  const ovAdd = document.getElementById('ov-add');
+  const ovDel = document.getElementById('ov-del');
+  const activitySvg = document.getElementById('activity-svg');
+  const contributorsList = document.getElementById('contributors-list');
+  const topFilesList = document.getElementById('top-files-list');
+  const authorStatsPane = document.getElementById('author-stats');
+  const authorBackBtn = document.getElementById('author-back-btn');
+  const authorStatsAvatar = document.getElementById('author-stats-avatar');
+  const authorStatsName = document.getElementById('author-stats-name');
+  const authorStatsEmail = document.getElementById('author-stats-email');
+  const auCommits = document.getElementById('au-commits');
+  const auAdd = document.getElementById('au-add');
+  const auDel = document.getElementById('au-del');
+  const weekdayChart = document.getElementById('weekday-chart');
+  const authorTopFiles = document.getElementById('author-top-files');
+  const authorHighlightBtn = document.getElementById('author-highlight-btn');
 
   // State
   let commits = [];
@@ -42,6 +70,30 @@
   let cachedLines = [];
   let cachedCommitNodes = {};
   const branchColorMap = new Map();
+  let currentStatsData = null;  // latest CodeStats from backend
+  let currentFocusedAuthor = null; // author name for author-detail state
+
+  // Right pane state machine
+  const RightPaneState = { OVERVIEW: 'overview', COMMIT: 'commit', AUTHOR: 'author', LOADING: 'loading' };
+  let rightPaneState = RightPaneState.LOADING;
+
+  function setRightPane(state) {
+    rightPaneState = state;
+    overviewStats.classList.add('hidden');
+    detailsContent.classList.add('hidden');
+    authorStatsPane.classList.add('hidden');
+    detailsPlaceholder.classList.add('hidden');
+
+    if (state === RightPaneState.LOADING) {
+      detailsPlaceholder.classList.remove('hidden');
+    } else if (state === RightPaneState.OVERVIEW) {
+      overviewStats.classList.remove('hidden');
+    } else if (state === RightPaneState.COMMIT) {
+      detailsContent.classList.remove('hidden');
+    } else if (state === RightPaneState.AUTHOR) {
+      authorStatsPane.classList.remove('hidden');
+    }
+  }
 
   // Pagination State
   let isFetching = false;
@@ -67,7 +119,8 @@
       currentPage,
       hasMoreCommits,
       filters,
-      detailsWidth: detailsPane.style.width
+      detailsWidth: detailsPane.style.width,
+      rightPaneState
     });
   }
 
@@ -200,6 +253,9 @@
     currentPage = 0;
     hasMoreCommits = true;
     commits = [];
+    selectedCommitHash = null;
+    currentFocusedAuthor = null;
+    setRightPane(RightPaneState.LOADING);
     isFetching = true;
     showLoading();
     errorBanner.classList.add('hidden');
@@ -207,6 +263,7 @@
     const filters = getFilters();
 
     vscode.postMessage({ command: 'loadData', filters, page: 0 });
+    requestStats(filters);
   }
 
   function loadNextPage() {
@@ -262,9 +319,20 @@
     renderTableAndGraph();
     
     if (selectedCommitHash) {
-      vscode.postMessage({ command: 'getCommitDetail', hash: selectedCommitHash });
+      // 缓存恢复：通过模拟行点击来完整初始化右侧详情面板（含分支名填充）
+      const restoredRow = commitsTbody.querySelector(`tr.commit-row[data-hash="${selectedCommitHash}"]`);
+      if (restoredRow) {
+        const restoredParents = JSON.parse(restoredRow.dataset.parents || '[]');
+        handleRowClick(restoredRow, selectedCommitHash, restoredParents);
+      } else {
+        vscode.postMessage({ command: 'getCommitDetail', hash: selectedCommitHash });
+        setRightPane(RightPaneState.COMMIT);
+      }
+    } else {
+      setRightPane(RightPaneState.LOADING);
     }
     vscode.postMessage({ command: 'initWatcher' });
+    requestStats(getFilters());
   } else {
     // 初始加载
     reloadData();
@@ -395,6 +463,21 @@
             }
           }
         }, 100);
+        break;
+      case 'statsLoaded':
+        currentStatsData = message.stats;
+        renderStatsStrip(message.stats);
+        if (rightPaneState === RightPaneState.OVERVIEW || rightPaneState === RightPaneState.LOADING) {
+          renderOverviewStats(message.stats);
+          setRightPane(RightPaneState.OVERVIEW);
+        } else if (rightPaneState === RightPaneState.AUTHOR && currentFocusedAuthor) {
+          // Refresh author detail with new data
+          const contrib = message.stats.contributors.find(c => c.author === currentFocusedAuthor);
+          if (contrib) { showAuthorDetail(contrib); }
+        }
+        break;
+      case 'statsError':
+        // Stats failed silently — just hide the strip loading state
         break;
     }
   });
@@ -698,6 +781,59 @@
     cachedLines = lines;
     cachedCommitNodes = commitNodes;
 
+    // 构建「提交 → 分支名」映射：让每个提交都知道它属于哪个分支（含颜色）
+    // 策略：从顶向下遍历，每个 lane 维护「当前分支名」，
+    // 优先用本地分支名，没有则用 remote 分支名（去掉 origin/ 前缀），
+    // 没有 decoration 的提交继承该 lane 上一个已知的分支名。
+    const laneCurrentBranch = {}; // lane → {name, color}
+    window._commitBranchLabel = {}; // hash → {name, color}
+    commits.forEach(c => {
+      const node = commitNodes[c.hash];
+      if (!node) return;
+      const lane = node.lane;
+      const laneColor = colors[lane % colors.length];
+
+      let resolvedBranch = null;
+      if (c.decorations && c.decorations.length > 0) {
+        // 优先：本地分支名（排除 HEAD、remote、tag）
+        resolvedBranch = c.decorations.find(d =>
+          d !== 'HEAD' &&
+          !d.startsWith('origin/') &&
+          !d.startsWith('tag: ') &&
+          !remoteBranches.includes(d)
+        );
+
+        // 次选：HEAD 后面紧跟的本地分支
+        if (!resolvedBranch && c.decorations[0] === 'HEAD') {
+          resolvedBranch = c.decorations.find(d =>
+            d !== 'HEAD' &&
+            !d.startsWith('origin/') &&
+            !d.startsWith('tag: ')
+          );
+        }
+
+        // 兜底：remote 分支，去掉 origin/ 前缀显示
+        if (!resolvedBranch) {
+          const remoteDec = c.decorations.find(d =>
+            d.startsWith('origin/') || remoteBranches.includes(d)
+          );
+          if (remoteDec) {
+            resolvedBranch = remoteDec.replace(/^origin\//, '');
+          }
+        }
+      }
+
+      if (resolvedBranch) {
+        laneCurrentBranch[lane] = { name: resolvedBranch, color: laneColor };
+      }
+
+      // 取该 lane 已知的分支名（可能是继承自上方的提交）
+      const branchLabel = laneCurrentBranch[lane] || null;
+      window._commitBranchLabel[c.hash] = branchLabel
+        ? { name: branchLabel.name, color: laneColor }
+        : { name: null, color: laneColor };
+    });
+
     // 动态图表宽度
     const computedGraphWidth = paddingLeft + (maxLanes + 1) * laneWidth;
     currentGraphWidth = computedGraphWidth;
@@ -733,19 +869,18 @@
         // 分支 decorations HTML（颜色与 lane 同步）
         let decsHtml = '';
         if (c.decorations && c.decorations.length > 0) {
-          const firstDec = c.decorations[0];
-          
-          const makeBadge = (dec) => {
+          const makeBadge = (dec, overrideLabel) => {
             let badgeClass = 'badge-branch';
             let iconHtml = '<i class="codicon codicon-git-branch"></i>';
             let badgeColor = branchColorMap.get(dec) || colors[0];
             let isHead = false;
             const isRemote = remoteBranches.includes(dec) || dec.startsWith('origin/');
+            let displayDec = overrideLabel || dec;
 
             if (dec.startsWith('tag: ')) {
               badgeClass = 'badge-tag';
               iconHtml = '<i class="codicon codicon-tag"></i>';
-              dec = dec.substring(5);
+              displayDec = overrideLabel || dec.substring(5);
               badgeColor = '#f59e0b';
             } else if (isRemote) {
               badgeClass = 'badge-remote-branch';
@@ -760,14 +895,32 @@
               ? `background-color: rgba(255,255,255,0.08); color: #fff;`
               : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor};`;
 
-            return `<span class="ref-badge ${badgeClass}" style="${style}">${iconHtml}${escapeHtml(dec)}</span>`;
+            return `<span class="ref-badge ${badgeClass}" style="${style}">${iconHtml}${escapeHtml(displayDec)}</span>`;
           };
 
-          decsHtml += makeBadge(firstDec);
+          // 如果第一个 decoration 是 HEAD，将其与紧跟的本地分支名合并显示
+          if (c.decorations[0] === 'HEAD') {
+            // 找紧跟 HEAD 之后的第一个本地分支（非 remote, 非 tag）
+            const nextLocal = c.decorations.slice(1).find(d =>
+              !d.startsWith('origin/') && !d.startsWith('tag: ') && !remoteBranches.includes(d)
+            );
+            const headLabel = nextLocal ? `HEAD → ${nextLocal}` : 'HEAD';
+            decsHtml += makeBadge('HEAD', headLabel);
 
-          if (c.decorations.length > 1) {
-            const remainingNames = c.decorations.slice(1).join(', ');
-            decsHtml += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="${escapeHtml(remainingNames)}">+${c.decorations.length - 1}</span>`;
+            // 剩余 decorations（去掉已合并进 HEAD badge 的分支）
+            const remaining = c.decorations.slice(1).filter(d => d !== nextLocal);
+            if (remaining.length === 1) {
+              decsHtml += makeBadge(remaining[0]);
+            } else if (remaining.length > 1) {
+              const remainingNames = remaining.join(', ');
+              decsHtml += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="${escapeHtml(remainingNames)}">+${remaining.length}</span>`;
+            }
+          } else {
+            decsHtml += makeBadge(c.decorations[0]);
+            if (c.decorations.length > 1) {
+              const remainingNames = c.decorations.slice(1).join(', ');
+              decsHtml += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="${escapeHtml(remainingNames)}">+${c.decorations.length - 1}</span>`;
+            }
           }
         }
 
@@ -785,11 +938,11 @@
                 ${decsHtml}
               </div>
               <div class="commit-meta">
-                <span class="commit-author" title="${escapeHtml(c.author)}">
+                <span class="commit-author" data-author="${escapeHtml(c.author)}" title="${escapeHtml(c.author)}">
                   ${authorAvatarHtml}
-                  <span style="vertical-align: middle;">${escapeHtml(c.author)}</span>
+                  <span class="author-name-text" style="vertical-align: middle;">${escapeHtml(c.author)}</span>
                 </span>
-                <span class="commit-date" title="${relTime}">${absTime}</span>
+                <span class="commit-date" title="${relTime}"><span class="date-full">${absTime}</span><span class="date-short">${formatDateShort(c.timestamp)}</span></span>
                 <span class="hash-copyable" data-full-hash="${c.hash}">${c.hash.substring(0, 7)}</span>
               </div>
             </div>
@@ -1006,11 +1159,7 @@
     if (!commit) return;
 
     // 仅在原先处于空状态时，才显示详情框并触发 slideDown 动画
-    if (detailsContent.classList.contains('hidden')) {
-      detailsPane.classList.remove('empty');
-      detailsPlaceholder.classList.add('hidden');
-      detailsContent.classList.remove('hidden');
-    }
+    setRightPane(RightPaneState.COMMIT);
 
     detailHashBadge.textContent = hash.substring(0, 7);
     detailHashBadge.dataset.fullHash = hash;
@@ -1031,7 +1180,11 @@
     const branchesContainer = document.getElementById('detail-branches-container');
     if (branchesContainer) {
       branchesContainer.innerHTML = '';
+
+      // 先展示显式 decorations（HEAD、分支名、tag 等）
+      let hasBadges = false;
       if (commit.decorations && commit.decorations.length > 0) {
+        hasBadges = true;
         branchesContainer.classList.remove('hidden');
         commit.decorations.forEach(dec => {
           let badgeClass = 'badge-branch';
@@ -1039,11 +1192,12 @@
           let badgeColor = branchColorMap.get(dec) || colors[0];
           let isHead = false;
           const isRemote = remoteBranches.includes(dec) || dec.startsWith('origin/');
+          let displayDec = dec;
 
           if (dec.startsWith('tag: ')) {
             badgeClass = 'badge-tag';
             iconHtml = '<i class="codicon codicon-tag"></i>';
-            dec = dec.substring(5);
+            displayDec = dec.substring(5);
             badgeColor = '#f59e0b';
           } else if (isRemote) {
             badgeClass = 'badge-remote-branch';
@@ -1061,10 +1215,27 @@
           const span = document.createElement('span');
           span.className = `ref-badge ${badgeClass}`;
           span.style.cssText = style;
-          span.innerHTML = `${iconHtml}${escapeHtml(dec)}`;
+          span.innerHTML = `${iconHtml}${escapeHtml(displayDec)}`;
           branchesContainer.appendChild(span);
         });
-      } else {
+      }
+
+      // 补充 lane 推断的分支名（仅当该分支名尚未在 decorations 中出现时）
+      const laneBranch = window._commitBranchLabel && window._commitBranchLabel[hash];
+      if (laneBranch && laneBranch.name) {
+        const alreadyShown = commit.decorations && commit.decorations.includes(laneBranch.name);
+        if (!alreadyShown) {
+          hasBadges = true;
+          branchesContainer.classList.remove('hidden');
+          const span = document.createElement('span');
+          span.className = 'ref-badge badge-branch';
+          span.style.cssText = `background-color: ${hexToRgba(laneBranch.color, 0.15)}; color: ${laneBranch.color};`;
+          span.innerHTML = `<i class="codicon codicon-git-branch"></i>${escapeHtml(laneBranch.name)}`;
+          branchesContainer.appendChild(span);
+        }
+      }
+
+      if (!hasBadges) {
         branchesContainer.classList.add('hidden');
       }
     }
@@ -1142,10 +1313,12 @@
     selectedCommitHash = null;
     saveCurrentState();
 
-    detailsPane.classList.add('empty');
-    detailsPlaceholder.classList.remove('hidden');
-    detailsContent.classList.add('hidden');
-    detailMergeBadge.classList.add('hidden');
+    // Return to overview stats (or loading if no stats yet)
+    if (currentStatsData) {
+      setRightPane(RightPaneState.OVERVIEW);
+    } else {
+      setRightPane(RightPaneState.LOADING);
+    }
   }
 
   // ── 文件树构建 + 路径压缩 ────────────────────────
@@ -1421,6 +1594,14 @@
     return `${year}-${month}-${day} ${hours}:${minutes}`;
   }
 
+  // 紧凑模式：只显示 MM-DD
+  function formatDateShort(timestamp) {
+    const d = new Date(timestamp * 1000);
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${month}-${day}`;
+  }
+
   function escapeHtml(str) {
     if (!str) return '';
     return str
@@ -1495,4 +1676,505 @@
   });
 
   window.addEventListener('resize', drawSvg);
+
+  // ── Stats Functions ──────────────────────────
+
+  function requestStats(filters) {
+    const statsFilters = {
+      branch: filters.branch,
+      author: filters.author,
+      since: filters.since,
+      until: filters.until
+    };
+    vscode.postMessage({ command: 'getStats', filters: statsFilters });
+  }
+
+  function fmtNum(n) {
+    if (n === undefined || n === null) return '—';
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return String(n);
+  }
+
+  function renderStatsStrip(stats) {
+    statsStrip.classList.remove('hidden');
+    stripCommitsVal.textContent = fmtNum(stats.totalCommits);
+    stripAdd.textContent = '+' + fmtNum(stats.totalAdditions);
+    stripDel.textContent = '-' + fmtNum(stats.totalDeletions);
+    stripContributorsVal.textContent = stats.contributors.length;
+    const range = `${stats.sinceDate} ~ ${stats.untilDate}`;
+    stripRange.textContent = range;
+  }
+
+  function renderOverviewStats(stats) {
+    // Range label
+    const rangeLabel = `${stats.sinceDate} → ${stats.untilDate}`;
+    overviewRange.textContent = rangeLabel;
+
+    // Summary cards
+    ovCommits.textContent = fmtNum(stats.totalCommits);
+    ovAdd.textContent = '+' + fmtNum(stats.totalAdditions);
+    ovDel.textContent = '-' + fmtNum(stats.totalDeletions);
+
+    // Activity SVG chart
+    renderActivityChart(stats.dailyActivity);
+
+    // Contributors leaderboard
+    contributorsList.innerHTML = '';
+    const maxChanged = stats.contributors[0] ? stats.contributors[0].totalChanged : 1;
+    stats.contributors.forEach((c, i) => {
+      const pct = maxChanged > 0 ? Math.round((c.totalChanged / maxChanged) * 100) : 0;
+      const color = getAvatarColor(c.author);
+      const initials = getInitials(c.author);
+      const row = document.createElement('div');
+      row.className = 'contributor-row';
+      row.innerHTML = `
+        <div class="contributor-row-top">
+          <span class="contributor-rank">${i + 1}</span>
+          <span class="avatar-circle" style="background-color:${color};width:18px;height:18px;font-size:8px;margin-right:0;flex-shrink:0;border:none;box-shadow:none;">${escapeHtml(initials)}</span>
+          <span class="contributor-name">${escapeHtml(c.author)}</span>
+          <span class="contributor-commits">${c.commits} commits</span>
+        </div>
+        <div class="contributor-bar-row">
+          <div class="contributor-bar-track">
+            <div class="contributor-bar-fill" style="width:${pct}%;background-color:${color};"></div>
+          </div>
+          <span class="contributor-line-stats">
+            <span class="contributor-line-add">+${fmtNum(c.additions)}</span>
+            &nbsp;
+            <span class="contributor-line-del">-${fmtNum(c.deletions)}</span>
+          </span>
+        </div>
+      `;
+      row.addEventListener('click', () => showAuthorDetail(c));
+      contributorsList.appendChild(row);
+    });
+
+    // Top files
+    renderTopFiles(topFilesList, stats.topFiles);
+  }
+
+  function renderActivityChart(dailyActivity) {
+    activitySvg.innerHTML = '';
+    if (!dailyActivity || dailyActivity.length === 0) return;
+
+    const svgW = activitySvg.clientWidth || 300;
+    const svgH = 80;
+    activitySvg.setAttribute('height', svgH);
+    activitySvg.style.height = svgH + 'px';
+
+    const padTop = 8;
+    const padBot = 20;  // room for month labels
+    const padLeft = 2;
+    const padRight = 2;
+    const chartW = svgW - padLeft - padRight;
+    const chartH = svgH - padTop - padBot;
+
+    const maxCount = Math.max(...dailyActivity.map(d => d.count), 1);
+    const n = dailyActivity.length;
+
+    // Compute point coordinates
+    const pts = dailyActivity.map((d, i) => ({
+      x: padLeft + (i / Math.max(n - 1, 1)) * chartW,
+      y: padTop + chartH - (d.count / maxCount) * chartH,
+      date: d.date,
+      count: d.count
+    }));
+
+    // Build smooth bezier path
+    function bezierPath(points) {
+      if (points.length === 0) return '';
+      if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+      let d = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+      for (let i = 0; i < points.length - 1; i++) {
+        const cp1x = (points[i].x + points[i + 1].x) / 2;
+        const cp1y = points[i].y;
+        const cp2x = (points[i].x + points[i + 1].x) / 2;
+        const cp2y = points[i + 1].y;
+        d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${points[i + 1].x.toFixed(2)} ${points[i + 1].y.toFixed(2)}`;
+      }
+      return d;
+    }
+
+    const linePath = bezierPath(pts);
+    const baseY = padTop + chartH;
+    const areaPath = linePath + ` L ${pts[pts.length - 1].x.toFixed(2)} ${baseY} L ${pts[0].x.toFixed(2)} ${baseY} Z`;
+
+    const ns = 'http://www.w3.org/2000/svg';
+    const gradId = 'activity-grad-' + Math.random().toString(36).slice(2);
+
+    // Gradient def
+    const defs = document.createElementNS(ns, 'defs');
+    const grad = document.createElementNS(ns, 'linearGradient');
+    grad.setAttribute('id', gradId);
+    grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
+    grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
+    const stop1 = document.createElementNS(ns, 'stop');
+    stop1.setAttribute('offset', '0%');
+    stop1.setAttribute('stop-color', 'var(--accent)');
+    stop1.setAttribute('stop-opacity', '0.35');
+    const stop2 = document.createElementNS(ns, 'stop');
+    stop2.setAttribute('offset', '100%');
+    stop2.setAttribute('stop-color', 'var(--accent)');
+    stop2.setAttribute('stop-opacity', '0.02');
+    grad.appendChild(stop1); grad.appendChild(stop2);
+    defs.appendChild(grad);
+    activitySvg.appendChild(defs);
+
+    // Area fill
+    const area = document.createElementNS(ns, 'path');
+    area.setAttribute('d', areaPath);
+    area.setAttribute('fill', `url(#${gradId})`);
+    area.setAttribute('stroke', 'none');
+    activitySvg.appendChild(area);
+
+    // Line
+    const line = document.createElementNS(ns, 'path');
+    line.setAttribute('d', linePath);
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', 'var(--accent)');
+    line.setAttribute('stroke-width', '1.8');
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('stroke-linejoin', 'round');
+    activitySvg.appendChild(line);
+
+    // Month tick labels
+    let lastMonth = '';
+    pts.forEach((p, i) => {
+      const month = dailyActivity[i].date.substring(0, 7); // YYYY-MM
+      if (month !== lastMonth) {
+        lastMonth = month;
+        const label = document.createElementNS(ns, 'text');
+        label.setAttribute('x', p.x.toFixed(1));
+        label.setAttribute('y', (svgH - 4).toFixed(1));
+        label.setAttribute('font-size', '8');
+        label.setAttribute('fill', 'var(--fg-faint, rgba(128,128,128,0.5))');
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-family', 'var(--font-family, sans-serif)');
+        label.textContent = month.substring(5); // MM only
+        activitySvg.appendChild(label);
+      }
+    });
+
+    // Interactive hover overlay
+    const hoverGroup = document.createElementNS(ns, 'g');
+    hoverGroup.setAttribute('style', 'pointer-events: none; opacity: 0;');
+    hoverGroup.setAttribute('class', 'activity-hover-group');
+
+    // Vertical crosshair
+    const vLine = document.createElementNS(ns, 'line');
+    vLine.setAttribute('class', 'activity-crosshair');
+    vLine.setAttribute('y1', padTop.toString());
+    vLine.setAttribute('y2', (padTop + chartH).toString());
+    vLine.setAttribute('stroke', 'var(--accent)');
+    vLine.setAttribute('stroke-width', '1');
+    vLine.setAttribute('stroke-dasharray', '3,3');
+    vLine.setAttribute('opacity', '0.5');
+    hoverGroup.appendChild(vLine);
+
+    // Hover dot
+    const dot = document.createElementNS(ns, 'circle');
+    dot.setAttribute('r', '4');
+    dot.setAttribute('fill', 'var(--accent)');
+    dot.setAttribute('stroke', 'var(--bg-color, #1e1e1e)');
+    dot.setAttribute('stroke-width', '2');
+    hoverGroup.appendChild(dot);
+    activitySvg.appendChild(hoverGroup);
+
+    // Tooltip element (HTML div, positioned absolutely)
+    let tooltip = document.getElementById('activity-tooltip');
+    if (!tooltip) {
+      tooltip = document.createElement('div');
+      tooltip.id = 'activity-tooltip';
+      tooltip.style.cssText = `
+        position: fixed; pointer-events: none; z-index: 9999;
+        background: var(--surface-2, #252526);
+        border: 1px solid var(--border-color, rgba(128,128,128,0.25));
+        border-radius: 6px;
+        padding: 5px 9px;
+        font-size: 11px;
+        font-family: var(--font-family, sans-serif);
+        color: var(--fg-color, #ccc);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+        white-space: nowrap;
+        display: none;
+        line-height: 1.5;
+      `;
+      document.body.appendChild(tooltip);
+    }
+
+    // Invisible wide overlay rect for mouse tracking
+    const overlay = document.createElementNS(ns, 'rect');
+    overlay.setAttribute('x', padLeft.toString());
+    overlay.setAttribute('y', padTop.toString());
+    overlay.setAttribute('width', chartW.toString());
+    overlay.setAttribute('height', chartH.toString());
+    overlay.setAttribute('fill', 'transparent');
+    overlay.setAttribute('style', 'cursor: pointer;');
+    activitySvg.appendChild(overlay);
+
+    overlay.addEventListener('mousemove', (e) => {
+      const rect = activitySvg.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left - padLeft;
+      const idx = Math.max(0, Math.min(n - 1, Math.round((mouseX / chartW) * (n - 1))));
+      const p = pts[idx];
+      const d = dailyActivity[idx];
+
+      hoverGroup.style.opacity = '1';
+      vLine.setAttribute('x1', p.x.toFixed(1));
+      vLine.setAttribute('x2', p.x.toFixed(1));
+      dot.setAttribute('cx', p.x.toFixed(1));
+      dot.setAttribute('cy', p.y.toFixed(1));
+
+      tooltip.style.display = 'block';
+      tooltip.innerHTML = `<span style="opacity:0.6;font-size:10px;">${d.date}</span><br><strong style="color:var(--accent);">${d.count}</strong> 次提交<br><span style="opacity:0.55;font-size:9.5px;">点击筛选此日</span>`;
+      // Position tooltip
+      const tx = e.clientX + 12;
+      const ty = e.clientY - 48;
+      tooltip.style.left = tx + 'px';
+      tooltip.style.top = ty + 'px';
+    });
+
+    overlay.addEventListener('mouseleave', () => {
+      hoverGroup.style.opacity = '0';
+      tooltip.style.display = 'none';
+    });
+
+    // Click a day → set date filter to that single day
+    overlay.addEventListener('click', (e) => {
+      const rect = activitySvg.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left - padLeft;
+      const idx = Math.max(0, Math.min(n - 1, Math.round((mouseX / chartW) * (n - 1))));
+      const d = dailyActivity[idx];
+      if (!d || !d.date) return;
+
+      // Set date preset to custom and fill since/until with the clicked day
+      datePresetSelect.value = 'custom';
+      dateRangeGroup.classList.remove('hidden');
+      sinceDate.value = d.date;
+      untilDate.value = d.date;
+      adjustSelectWidth(datePresetSelect);
+
+      // Brief flash on the overlay to confirm click
+      overlay.style.opacity = '0.15';
+      overlay.style.fill = 'var(--accent)';
+      setTimeout(() => {
+        overlay.style.opacity = '';
+        overlay.style.fill = 'transparent';
+      }, 180);
+
+      tooltip.style.display = 'none';
+      reloadData();
+    });
+  }
+
+  function renderTopFiles(container, files) {
+    container.innerHTML = '';
+    if (!files || files.length === 0) {
+      container.innerHTML = '<div style="opacity:0.4;font-size:11px;padding:4px 8px;">暂无数据</div>';
+      return;
+    }
+    const maxChanges = files[0].changes;
+    files.forEach(f => {
+      const pct = maxChanges > 0 ? Math.round((f.changes / maxChanges) * 100) : 0;
+      const row = document.createElement('div');
+      row.className = 'top-file-row top-file-row-clickable';
+      row.title = `${f.path}\n点击打开文件`;
+      row.innerHTML = `
+        <span class="top-file-name">${escapeHtml(f.path)}</span>
+        <div class="top-file-bar-track"><div class="top-file-bar-fill" style="width:${pct}%;"></div></div>
+        <span class="top-file-count">${f.changes}次</span>
+        <i class="codicon codicon-go-to-file top-file-open-icon" title="打开文件"></i>
+      `;
+      row.addEventListener('click', () => {
+        vscode.postMessage({
+          command: 'openWorkspaceFile',
+          file: f.path
+        });
+      });
+      container.appendChild(row);
+    });
+  }
+
+  function showAuthorDetail(contributor) {
+    currentFocusedAuthor = contributor.author;
+    setRightPane(RightPaneState.AUTHOR);
+
+    const color = getAvatarColor(contributor.author);
+    const initials = getInitials(contributor.author);
+    authorStatsAvatar.textContent = initials;
+    authorStatsAvatar.style.backgroundColor = color;
+    authorStatsName.textContent = contributor.author;
+    authorStatsEmail.textContent = contributor.email || '';
+
+    auCommits.textContent = fmtNum(contributor.commits);
+    auAdd.textContent = '+' + fmtNum(contributor.additions);
+    auDel.textContent = '-' + fmtNum(contributor.deletions);
+
+    // Weekday bar chart
+    weekdayChart.innerHTML = '';
+    const dayLabels = ['日', '一', '二', '三', '四', '五', '六'];
+    const wd = contributor.weekdayDistribution || [0,0,0,0,0,0,0];
+    const maxWd = Math.max(...wd, 1);
+    // Reorder: Mon-Sun (index 1..6, 0)
+    const order = [1,2,3,4,5,6,0];
+    const orderLabels = ['一','二','三','四','五','六','日'];
+    order.forEach((dayIdx, i) => {
+      const count = wd[dayIdx] || 0;
+      const heightPct = Math.max(4, Math.round((count / maxWd) * 100));
+      const col = document.createElement('div');
+      col.className = 'weekday-col';
+      col.innerHTML = `
+        <div class="weekday-bar" style="height:${heightPct}%;background-color:${color};opacity:0.65;" title="${orderLabels[i]}: ${count}次"></div>
+        <span class="weekday-label">${orderLabels[i]}</span>
+      `;
+      weekdayChart.appendChild(col);
+    });
+
+    // Author top files: use per-author topFiles from contributor data
+    authorTopFiles.innerHTML = '';
+    if (contributor.topFiles && contributor.topFiles.length > 0) {
+      renderTopFiles(authorTopFiles, contributor.topFiles);
+    } else if (currentStatsData && currentStatsData.topFiles) {
+      // fallback to global if per-author data unavailable
+      renderTopFiles(authorTopFiles, currentStatsData.topFiles.slice(0, 5));
+    } else {
+      authorTopFiles.innerHTML = '<div style="opacity:0.4;font-size:11px;padding:4px 8px;">暂无数据</div>';
+    }
+  }
+
+  // Back button
+  authorBackBtn.addEventListener('click', () => {
+    currentFocusedAuthor = null;
+    if (currentStatsData) {
+      renderOverviewStats(currentStatsData);
+      setRightPane(RightPaneState.OVERVIEW);
+    } else {
+      setRightPane(RightPaneState.LOADING);
+    }
+  });
+
+  // Stats toggle button — force show overview
+  statsToggleBtn.addEventListener('click', () => {
+    if (currentStatsData) {
+      // Deselect any commit
+      const sel = commitsTbody.querySelector('tr.commit-row.selected');
+      if (sel) sel.classList.remove('selected');
+      selectedCommitHash = null;
+      renderOverviewStats(currentStatsData);
+      setRightPane(RightPaneState.OVERVIEW);
+    }
+  });
+
+  // Author highlight button — set author filter in graph
+  authorHighlightBtn.addEventListener('click', () => {
+    if (!currentFocusedAuthor) return;
+    // Check if author is already an option; if not, add it dynamically
+    const existingOption = Array.from(authorSelect.options).find(o => o.value === currentFocusedAuthor);
+    if (!existingOption) {
+      const opt = document.createElement('option');
+      opt.value = currentFocusedAuthor;
+      opt.textContent = currentFocusedAuthor;
+      authorSelect.appendChild(opt);
+    }
+    authorSelect.value = currentFocusedAuthor;
+    adjustSelectWidth(authorSelect);
+    reloadData();
+  });
+
+  // 作者区域点击：不再拦截跳转作者统计，让事件冒泡到行点击处理器，展示提交详情
+  // （作者统计仍可通过右侧 Overview 面板中的贡献者列表访问）
+
+  // ── 响应式断点：监听左侧面板宽度，动态切换 pane-compact / pane-narrow ──
+  const leftPaneEl = document.querySelector('.left-pane');
+  if (leftPaneEl && window.ResizeObserver) {
+    const paneObserver = new ResizeObserver(entries => {
+      const w = entries[0].contentRect.width;
+      leftPaneEl.classList.toggle('pane-medium',  w < 480);
+      leftPaneEl.classList.toggle('pane-compact', w < 320);
+      leftPaneEl.classList.toggle('pane-narrow',  w < 220);
+
+      // 动态更新搜索框 placeholder 文字
+      if (searchInput) {
+        if (w < 320) {
+          searchInput.placeholder = '搜索…';
+        } else if (w < 480) {
+          searchInput.placeholder = '搜索';
+        } else {
+          searchInput.placeholder = '搜索消息或哈希';
+        }
+      }
+    });
+    paneObserver.observe(leftPaneEl);
+  }
+
+  // ── 窄屏 Overlay 模式：监听整体 main-layout 宽度 ──
+  const mainLayoutEl = document.querySelector('.main-layout');
+  const overlayBackdrop = document.getElementById('overlay-backdrop');
+  const overlayCloseBtn = document.getElementById('overlay-close-btn');
+  const OVERLAY_BREAKPOINT = 550;
+  let isOverlayMode = false;
+
+  function openOverlay() {
+    detailsPane.classList.add('overlay-open');
+    overlayBackdrop.classList.add('visible');
+  }
+
+  function closeOverlay() {
+    detailsPane.classList.remove('overlay-open');
+    overlayBackdrop.classList.remove('visible');
+  }
+
+  if (overlayBackdrop) {
+    overlayBackdrop.addEventListener('click', closeOverlay);
+  }
+  if (overlayCloseBtn) {
+    overlayCloseBtn.addEventListener('click', closeOverlay);
+  }
+
+  // 原始的 setRightPane 逻辑：在 overlay 模式下，自动打开面板
+  const _origSetRightPane = setRightPane;
+  // 重新包装 setRightPane：在窄屏时选中提交或切换到 OVERVIEW/AUTHOR 时自动打开 overlay
+  function setRightPaneWithOverlay(state) {
+    _origSetRightPane(state);
+    if (isOverlayMode && state !== RightPaneState.LOADING) {
+      openOverlay();
+    }
+  }
+  // 替换全局引用（仅对后续调用有效）
+  // 由于 JS 闭包，这里改为直接在 ResizeObserver 回调中打 patch
+  if (mainLayoutEl && window.ResizeObserver) {
+    const layoutObserver = new ResizeObserver(entries => {
+      const w = entries[0].contentRect.width;
+      const shouldBeNarrow = w < OVERLAY_BREAKPOINT;
+      if (shouldBeNarrow === isOverlayMode) return;
+      isOverlayMode = shouldBeNarrow;
+      mainLayoutEl.classList.toggle('layout-narrow', isOverlayMode);
+      if (!isOverlayMode) {
+        // 退出 overlay 模式时，确保面板可见（重置 transform）
+        closeOverlay();
+        detailsPane.style.width = '';
+      } else {
+        // 进入 overlay 模式时，如果当前有内容则保持打开
+        closeOverlay();
+      }
+    });
+    layoutObserver.observe(mainLayoutEl);
+  }
+
+  // 在 overlay 模式下，点击提交行 → 打开面板
+  commitsTbody.addEventListener('click', () => {
+    if (isOverlayMode) {
+      // 延迟一帧等待右侧面板内容更新
+      requestAnimationFrame(openOverlay);
+    }
+  });
+
+  // stats toggle btn 在 overlay 模式下 → 打开 overlay
+  const _origStatsToggleHandler = statsToggleBtn.onclick;
+  statsToggleBtn.addEventListener('click', () => {
+    if (isOverlayMode && currentStatsData) {
+      requestAnimationFrame(openOverlay);
+    }
+  });
 })();

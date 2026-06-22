@@ -74,12 +74,14 @@ export function activate(context: vscode.ExtensionContext) {
         // Construct resourceList for vscode.changes Multi Diff Editor
         const resourceList = commits.map(commit => {
           const absoluteFilePath = filePath;
+          // 空树 hash：用于根提交（无 parent）时作为 original 侧
+          const emptyTreeRef = commit.parentHash || '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
           const leftUri = vscode.Uri.from({
             scheme: 'git',
             path: absoluteFilePath,
             query: JSON.stringify({
               path: absoluteFilePath,
-              ref: commit.parentHash || 'empty'
+              ref: emptyTreeRef
             })
           });
 
@@ -109,7 +111,7 @@ export function activate(context: vscode.ExtensionContext) {
             })
           });
 
-          return [rightUri, leftUri, labelUri];
+          return [leftUri, rightUri, labelUri];
         });
 
         const title = `Git 选区历史: ${fileName} (L${startLine}-L${endLine})`;

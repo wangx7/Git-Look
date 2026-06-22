@@ -17,7 +17,7 @@
         <div class="spinner"></div>
       </div>
 
-      <!-- Left Column: Filter + List -->
+      <!-- Left Column: Filter + Stats Strip + List -->
       <div class="left-pane">
         <!-- 过滤工具栏 -->
         <div class="filter-bar">
@@ -62,6 +62,31 @@
           </button>
         </div>
 
+        <!-- Stats Strip -->
+        <div id="stats-strip" class="stats-strip hidden">
+          <div class="stats-strip-content">
+            <span class="stats-strip-item" id="strip-commits">
+              <i class="codicon codicon-git-commit"></i>
+              <span id="strip-commits-val">—</span> 次提交
+            </span>
+            <span class="stats-strip-sep">·</span>
+            <span class="stats-strip-item">
+              <span class="stats-strip-add" id="strip-add">—</span>
+              <span class="stats-strip-del" id="strip-del">—</span>
+            </span>
+            <span class="stats-strip-sep">·</span>
+            <span class="stats-strip-item" id="strip-contributors">
+              <i class="codicon codicon-people"></i>
+              <span id="strip-contributors-val">—</span> 人
+            </span>
+            <span class="stats-strip-sep">·</span>
+            <span class="stats-strip-range" id="strip-range">近100天</span>
+          </div>
+          <button id="stats-toggle-btn" class="stats-toggle-btn" title="在右侧查看详细统计">
+            <i class="codicon codicon-graph"></i>
+          </button>
+        </div>
+
         <!-- 错误提示 -->
         <div id="error-message" class="error-banner hidden"></div>
 
@@ -81,13 +106,66 @@
       <!-- Resizer handle -->
       <div id="resizer-bar" class="resizer-bar"></div>
 
-      <!-- Right Pane: Commit Details -->
-      <div class="details-pane empty">
-        <div class="details-placeholder">
-          <i class="codicon codicon-git-commit"></i>
-          <span>选择一次提交<br>查看详细信息</span>
+      <!-- Overlay backdrop (shown in narrow/overlay mode) -->
+      <div id="overlay-backdrop" class="overlay-backdrop"></div>
+
+      <!-- Right Pane: Three States -->
+      <div class="details-pane" id="details-pane">
+        <!-- Close button (narrow overlay mode only) -->
+        <button class="overlay-close-btn" id="overlay-close-btn" title="关闭">
+          <i class="codicon codicon-close"></i>
+        </button>
+
+        <!-- ── State 0: Overview Stats (default when nothing selected) ── -->
+        <div id="overview-stats" class="overview-stats hidden">
+          <div class="overview-header">
+            <span class="overview-title"><i class="codicon codicon-graph"></i> 代码统计</span>
+            <span class="overview-range" id="overview-range">近100天</span>
+          </div>
+
+          <!-- Summary Cards -->
+          <div class="stat-cards">
+            <div class="stat-card">
+              <div class="stat-card-value" id="ov-commits">—</div>
+              <div class="stat-card-label">提交数</div>
+            </div>
+            <div class="stat-card stat-card-add">
+              <div class="stat-card-value" id="ov-add">—</div>
+              <div class="stat-card-label">新增行</div>
+            </div>
+            <div class="stat-card stat-card-del">
+              <div class="stat-card-value" id="ov-del">—</div>
+              <div class="stat-card-label">删除行</div>
+            </div>
+          </div>
+
+          <!-- Activity Chart -->
+          <div class="stats-section">
+            <div class="stats-section-title">提交活跃度</div>
+            <div class="activity-chart-wrap">
+              <svg id="activity-svg" class="activity-svg"></svg>
+            </div>
+          </div>
+
+          <!-- Contributors Leaderboard -->
+          <div class="stats-section">
+            <div class="stats-section-title">贡献者排行 <span class="stats-section-hint">点击查看详情</span></div>
+            <div id="contributors-list" class="contributors-list"></div>
+          </div>
+
+          <!-- Top Files -->
+          <div class="stats-section">
+            <div class="stats-section-title">高频修改文件</div>
+            <div id="top-files-list" class="top-files-list"></div>
+          </div>
         </div>
-        <div class="details-content hidden">
+
+        <!-- ── State 1: Commit Detail (existing, kept intact) ── -->
+        <div class="details-placeholder" id="details-placeholder">
+          <i class="codicon codicon-graph"></i>
+          <span>加载统计中…</span>
+        </div>
+        <div class="details-content hidden" id="details-content">
           <div class="details-header-section">
             <div class="details-meta-row">
               <span class="detail-author-info-compact">
@@ -120,7 +198,59 @@
             </div>
           </div>
         </div>
-      </div>
+
+        <!-- ── State 2: Author Detail ── -->
+        <div id="author-stats" class="author-stats hidden">
+          <div class="author-stats-header">
+            <button class="back-btn" id="author-back-btn">
+              <i class="codicon codicon-arrow-left"></i> 返回概览
+            </button>
+          </div>
+          <div class="author-profile">
+            <span class="avatar-circle author-stats-avatar" id="author-stats-avatar"></span>
+            <div class="author-profile-info">
+              <div class="author-profile-name" id="author-stats-name"></div>
+              <div class="author-profile-email" id="author-stats-email"></div>
+            </div>
+          </div>
+
+          <!-- Author Summary Cards -->
+          <div class="stat-cards">
+            <div class="stat-card">
+              <div class="stat-card-value" id="au-commits">—</div>
+              <div class="stat-card-label">提交数</div>
+            </div>
+            <div class="stat-card stat-card-add">
+              <div class="stat-card-value" id="au-add">—</div>
+              <div class="stat-card-label">新增行</div>
+            </div>
+            <div class="stat-card stat-card-del">
+              <div class="stat-card-value" id="au-del">—</div>
+              <div class="stat-card-label">删除行</div>
+            </div>
+          </div>
+
+          <!-- Weekday Distribution -->
+          <div class="stats-section">
+            <div class="stats-section-title">活跃时段（按星期）</div>
+            <div id="weekday-chart" class="weekday-chart"></div>
+          </div>
+
+          <!-- Author Top Files -->
+          <div class="stats-section">
+            <div class="stats-section-title">最常修改文件</div>
+            <div id="author-top-files" class="top-files-list"></div>
+          </div>
+
+          <!-- Highlight in graph -->
+          <div class="author-actions">
+            <button class="author-highlight-btn" id="author-highlight-btn">
+              <i class="codicon codicon-eye"></i> 在图谱中高亮此作者
+            </button>
+          </div>
+        </div>
+
+      </div><!-- /details-pane -->
     </div>
   </div>
 
