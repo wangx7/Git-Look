@@ -333,6 +333,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
+
       }
     });
   }

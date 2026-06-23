@@ -461,12 +461,15 @@ export async function traceLineHistory(
     const commits: CommitDiff[] = [];
     let currentCommit: CommitDiff | null = null;
 
+    let seenDiffHeader = false;
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (line.startsWith('COMMIT_START_LOOK\x1f')) {
         if (currentCommit) {
           commits.push(currentCommit);
         }
+        seenDiffHeader = false;
         const parts = line.substring('COMMIT_START_LOOK\x1f'.length).split('\x1f');
         const hash = parts[0];
         const parentsStr = parts[1] || '';
@@ -489,13 +492,27 @@ export async function traceLineHistory(
           diffLines: []
         };
       } else if (currentCommit) {
+        // Track when we enter the diff section (skip diff metadata headers)
+        if (line.startsWith('diff --git')) {
+          seenDiffHeader = true;
+          continue;
+        }
         if (
-          line.startsWith('diff --git') ||
           line.startsWith('---') ||
           line.startsWith('+++') ||
           line.startsWith('index ') ||
           line.startsWith('@@ ')
         ) {
+          continue;
+        }
+
+        // Skip lines before the diff header (blank lines between format output and diff)
+        if (!seenDiffHeader) {
+          continue;
+        }
+
+        // Skip '\ No newline at end of file' marker
+        if (line.startsWith('\\')) {
           continue;
         }
         
@@ -533,19 +550,31 @@ export async function traceLineHistory(
       }
     }
 
-    // Filter out commits that have no actual additions or deletions or only whitespace changes
+    // Filter out commits where the tracked line range has only whitespace/indentation changes.
+    // This matches VS Code's built-in diff highlighting: VS Code ignores whitespace
+    // differences, so commits that only changed indentation show zero highlights.
+    // We normalize each line (trim + collapse internal whitespace) and compare
+    // deleted vs added lines to determine if there are real content changes.
+    const normalize = (text: string) => text.trim().replace(/\s+/g, ' ');
     return commits.filter(c => {
-      const hasAddedOrDeleted = c.diffLines.some(l => l.type === 'added' || l.type === 'deleted');
-      if (!hasAddedOrDeleted) {
+      const added = c.diffLines.filter(l => l.type === 'added');
+      const deleted = c.diffLines.filter(l => l.type === 'deleted');
+
+      // If only additions or only deletions exist, it's a real change
+      if (added.length === 0 && deleted.length === 0) {
         return false;
       }
-      const clean = (text: string) => text.replace(/\s+/g, '');
-      const deletedText = clean(c.diffLines.filter(l => l.type === 'deleted').map(l => l.text).join(''));
-      const addedText = clean(c.diffLines.filter(l => l.type === 'added').map(l => l.text).join(''));
-      if (deletedText === addedText) {
-        return false;
+      if (added.length !== deleted.length) {
+        return true;
       }
-      return true;
+
+      // Same number of added/deleted lines — compare each pair ignoring whitespace
+      for (let i = 0; i < added.length; i++) {
+        if (normalize(deleted[i].text) !== normalize(added[i].text)) {
+          return true; // Found a real content change
+        }
+      }
+      return false; // All lines differ only in whitespace
     });
   } catch (e: any) {
     if (e.message === 'ABORTED') {

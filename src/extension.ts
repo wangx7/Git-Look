@@ -57,12 +57,18 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const filePath = document.uri.fsPath;
+    let filePath = document.uri.fsPath;
 
     let startRef: string | undefined = undefined;
     if (document.uri.scheme === 'git') {
       try {
         const queryObj = JSON.parse(document.uri.query);
+        if (queryObj.ref) {
+          startRef = queryObj.ref;
+        }
+        if (queryObj.path) {
+          filePath = queryObj.path;
+        }
       } catch (e) {
         // Ignore
       }
@@ -97,11 +103,14 @@ export function activate(context: vscode.ExtensionContext) {
 
         const resourceList: any[] = [];
 
-        // git log -L returns commits newest-first; keep that order so the
-        // multi-diff editor shows the latest change at the top.
-        const orderedCommits = commits;
+        // Compute repoRoot once before the loop to avoid redundant git calls
+        let repoRoot = cwd;
+        try {
+          repoRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+        } catch (e) { }
+        const repoFilePath = path.relative(repoRoot, filePath).replace(/\\/g, '/');
 
-        for (const commit of orderedCommits) {
+        for (const commit of commits) {
           // Safely resolve the parent ref — parentHash may be the literal string 'empty'
           // when traceLineHistory encounters a root commit (no actual parent).
           let parentRef = (!commit.parentHash || commit.parentHash === 'empty')
@@ -113,11 +122,6 @@ export function activate(context: vscode.ExtensionContext) {
           // we must diff it against the EMPTY_TREE so VS Code can render the diff properly.
           if (parentRef !== EMPTY_TREE) {
             try {
-              let repoRoot = cwd;
-              try {
-                repoRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-              } catch (e) { }
-              const repoFilePath = path.relative(repoRoot, filePath).replace(/\\/g, '/');
               await execGit(['cat-file', '-e', `${parentRef}:${repoFilePath}`], repoRoot);
             } catch (e) {
               parentRef = EMPTY_TREE;
@@ -125,29 +129,27 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           // File as it existed in the parent commit (older state → LEFT side)
-          let parentHashDisplay = parentRef === EMPTY_TREE ? 'Empty Tree' : parentRef.substring(0, 7);
-          const originalLabel = `/[${parentHashDisplay}]/${fileName}`;
+          // Use the actual file path so VS Code's git content provider can resolve the content.
           const originalUri = vscode.Uri.from({
             scheme: 'git',
-            path: originalLabel,
+            path: filePath,
             query: JSON.stringify({ path: filePath, ref: parentRef })
           });
 
-          // Construct a dummy label URI to satisfy the 3-element tuple requirement of vscode.changes
+          // Construct a label URI with commit info for the multi-diff tab title display
+          const parentHashDisplay = parentRef === EMPTY_TREE ? 'Empty Tree' : parentRef.substring(0, 7);
+          const cleanMessage = commit.message.replace(/[\r\n]+/g, ' ').substring(0, 30);
           const labelUri = vscode.Uri.from({
             scheme: 'git-visual',
-            path: '/dummy',
-            query: ''
+            path: `/${fileName}`,
+            query: `[${parentHashDisplay}] → [${commit.hash.substring(0, 7)}] ${cleanMessage}`
           });
 
           // File as it became in this commit (newer state → RIGHT side)
-          // We put the commit info in a pseudo-directory so the basename matches the real file, preserving syntax highlighting.
-          const cleanMessage = commit.message.replace(/[\r\n]+/g, ' ').substring(0, 30);
-          const modifiedLabel = `/[${commit.hash.substring(0, 7)}] ${cleanMessage}/${fileName}`;
-
+          // Use the actual file path so VS Code's git content provider can resolve the content.
           const modifiedUri = vscode.Uri.from({
             scheme: 'git',
-            path: modifiedLabel,
+            path: filePath,
             query: JSON.stringify({ path: filePath, ref: commit.hash })
           });
           // vscode.changes tuple: [labelUri, originalUri, modifiedUri]
@@ -157,18 +159,17 @@ export function activate(context: vscode.ExtensionContext) {
         // Prepend working-tree (uncommitted) changes as the very first — i.e. newest — entry.
         if (hasLocalChanges) {
           const latestRef = commits[0]?.hash ?? 'HEAD';
-          const headLabel = `/[${latestRef.substring(0, 7)}]/${fileName}`;
           const headUri = vscode.Uri.from({
             scheme: 'git',
-            path: headLabel,
+            path: filePath,
             query: JSON.stringify({ path: filePath, ref: latestRef })
           });
           const workingTreeUri = vscode.Uri.file(filePath);
 
           const labelUri = vscode.Uri.from({
             scheme: 'git-visual',
-            path: '/dummy',
-            query: ''
+            path: `/${fileName}`,
+            query: `[${latestRef.substring(0, 7)}] → 工作区未提交更改`
           });
 
           // For local working tree changes, we pass the actual file URI so it remains editable.

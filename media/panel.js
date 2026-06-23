@@ -586,200 +586,216 @@
       return;
     }
 
-    // ─── 1. 图表 Lane 分配算法（防重叠 · Map O(1) 优化版）─────────
+    // ─── 1. 图表 Lane 分配算法（防重叠新版）─────────
 
     const commitHashes = new Set(commits.map(c => c.hash));
-    // 构建 hash→commit O(1) 查找表，避免在主干识别循环中反复线性 find
     const hashToCommitMap = new Map();
-    commits.forEach(c => hashToCommitMap.set(c.hash, c));
+    const hashToCommitRowMap = new Map();
+    commits.forEach((c, index) => {
+      hashToCommitMap.set(c.hash, c);
+      hashToCommitRowMap.set(c.hash, index);
+    });
 
-    const lanes = [];             // lanes[i] = hash or null
-    const hashToLane = new Map(); // 反向映射：hash → laneIdx（O(1) 查找替代 indexOf）
-    const commitNodes = {};       // hash → { row, lane }
+    const lanes = [];             // lanes[i] = hash or null (activeLanes)
+    const commitNodes = {};       // hash → { row, lane, isMerge }
     const lines = [];             // 连线数据
     let maxLanes = 0;
 
-    // lane 辅助函数（保持 lanes[] 与 hashToLane 严格同步）
-    function laneSet(idx, hash) {
-      const old = lanes[idx];
-      if (old != null) { hashToLane.delete(old); }
-      lanes[idx] = hash;
-      if (hash != null) { hashToLane.set(hash, idx); }
-    }
-    function laneIndexOf(hash) {
-      const idx = hashToLane.get(hash);
-      return idx !== undefined ? idx : -1;
-    }
-    function lanePushNull() { lanes.push(null); }
-    function lanePush(hash) {
+    // Helper to find first null slot or push a new one
+    function getEmptyLaneIndex(preferZero = false) {
+      if (preferZero && lanes[0] === null) {
+        return 0;
+      }
+      const start = preferZero ? 0 : 1;
+      for (let i = start; i < lanes.length; i++) {
+        if (lanes[i] === null) {
+          return i;
+        }
+      }
+      if (preferZero && lanes.length === 0) {
+        lanes.push(null); // lane 0
+        return 0;
+      }
+      if (lanes.length === 0) {
+        lanes.push(null); // lane 0
+      }
       const idx = lanes.length;
-      lanes.push(hash);
-      if (hash != null) { hashToLane.set(hash, idx); }
+      lanes.push(null);
       return idx;
     }
 
-    // 找出主干提交，强行绑定在 Lane 0 (主轴)
+    // Determine if a commit is main trunk
     const mainTrunk = new Set();
     const headCommit = commits.find(c => c.decorations && c.decorations.includes('HEAD'));
     let curr = headCommit ? headCommit.hash : (commits[0] ? commits[0].hash : null);
     while (curr) {
       mainTrunk.add(curr);
-      const c = hashToCommitMap.get(curr); // O(1)，原先为 O(n) find
+      const c = hashToCommitMap.get(curr);
       curr = (c && c.parents && c.parents.length > 0) ? c.parents[0] : null;
     }
 
-    // 分支名 -> 颜色映射（用于 badge 上色）
+    // Branch colors decoration mapping
     branchColorMap.clear();
 
     for (let r = 0; r < commits.length; r++) {
       const c = commits[r];
       const hash = c.hash;
-      const parents = c.parents;
+      const parents = c.parents || [];
       const isMerge = parents.length >= 2;
 
-      // 找到或分配 lane（O(1) Map 查找）
-      let laneIdx = laneIndexOf(hash);
+      // 1. Find or assign lane for the current commit
+      let laneIdx = lanes.indexOf(hash);
       if (laneIdx === -1) {
+        // Not in activeLanes. This is a branch tip or HEAD.
         if (mainTrunk.has(hash)) {
           laneIdx = 0;
           if (lanes.length === 0) {
-            lanePush(hash);
+            lanes.push(hash);
           } else {
-            laneSet(0, hash);
+            lanes[0] = hash;
           }
         } else {
-          // 从 lane 1 开始找空槽（保留 lane 0 给主轴）
-          let emptySlot = -1;
-          for (let s = 1; s < lanes.length; s++) {
-            if (lanes[s] === null) { emptySlot = s; break; }
-          }
-          if (emptySlot !== -1) {
-            laneIdx = emptySlot;
-            laneSet(laneIdx, hash);
-          } else {
-            if (lanes.length === 0) {
-              lanePushNull(); // Lane 0 保留给主轴
-              laneIdx = lanePush(hash); // Lane 1
-            } else {
-              laneIdx = lanePush(hash);
-            }
-          }
+          laneIdx = getEmptyLaneIndex(false);
+          lanes[laneIdx] = hash;
         }
       }
 
+      // Update all lines pointing to this commit to use its final lane
+      lines.forEach(line => {
+        if (line.toHash === hash) {
+          line.toLane = laneIdx;
+          if (!line.isMergeLine) {
+            line.runningLane = laneIdx;
+          }
+        }
+      });
+
+      // Record commit node position
       commitNodes[hash] = { row: r, lane: laneIdx, isMerge };
       maxLanes = Math.max(maxLanes, lanes.length);
 
-      // 将 decoration 的分支名关联到 lane 颜色
+      // Branch color mapping
       if (c.decorations && c.decorations.length > 0) {
         c.decorations.forEach(dec => {
           branchColorMap.set(dec, colors[laneIdx % colors.length]);
         });
       }
 
-      const incomingLanes = [...lanes];
+      // 2. Free up the slot of the current commit in activeLanes
+      lanes[laneIdx] = null;
 
-      // 释放当前 lane
-      laneSet(laneIdx, null);
-
-      // 处理父节点
+      // 3. Process parents to reserve lanes and generate lines
       if (parents.length > 0) {
-        // 主父节点
+        // A. Primary parent (first parent)
         const p0 = parents[0];
         if (commitHashes.has(p0)) {
-          const p0LaneIdx = laneIndexOf(p0); // O(1)
-          let targetLaneIdx = laneIdx;
+          const p0Row = hashToCommitRowMap.get(p0);
+          let targetLaneIdx = lanes.indexOf(p0);
 
-          if (p0LaneIdx !== -1) {
-            targetLaneIdx = p0LaneIdx;
-          } else {
-            if (mainTrunk.has(p0)) {
-              if (lanes[0] == null) {
-                laneSet(0, p0);
-              }
-              targetLaneIdx = 0;
-            } else {
-              laneSet(laneIdx, p0);
+          if (targetLaneIdx !== -1) {
+            // p0 is already reserved by another child.
+            // If the current child has a smaller lane index (higher priority, closer to main trunk),
+            // we should steal the parent reservation to this smaller lane index!
+            if (laneIdx < targetLaneIdx) {
+              lanes[targetLaneIdx] = null;
+              lanes[laneIdx] = p0;
               targetLaneIdx = laneIdx;
+            }
+          } else {
+            // No other child has claimed p0 yet. p0 inherits this lane!
+            if (mainTrunk.has(p0)) {
+              targetLaneIdx = 0;
+              lanes[0] = p0;
+            } else {
+              targetLaneIdx = laneIdx;
+              lanes[laneIdx] = p0;
             }
           }
 
           lines.push({
-            fromRow: r, fromLane: laneIdx,
-            toRow: r + 1, toLane: targetLaneIdx,
+            fromRow: r,
+            fromLane: laneIdx,
+            toRow: p0Row,
+            toLane: targetLaneIdx,
+            runningLane: targetLaneIdx,
+            toHash: p0,
             colorIdx: laneIdx
           });
         } else {
+          // Parent not loaded
           lines.push({
-            fromRow: r, fromLane: laneIdx,
-            toRow: r + 0.5, toLane: laneIdx,
-            colorIdx: laneIdx, fade: true
+            fromRow: r,
+            fromLane: laneIdx,
+            toRow: r + 0.5,
+            toLane: laneIdx,
+            runningLane: laneIdx,
+            colorIdx: laneIdx,
+            fade: true
           });
         }
 
-        // 其他父节点（合并分支）
+        // B. Secondary parents (merge sources)
         for (let p = 1; p < parents.length; p++) {
           const pk = parents[p];
           if (commitHashes.has(pk)) {
-            const pkLaneIdx = laneIndexOf(pk); // O(1)
-            let pkTargetLaneIdx = pkLaneIdx;
+            const pkRow = hashToCommitRowMap.get(pk);
+            let targetLaneIdx = lanes.indexOf(pk);
 
-            if (pkLaneIdx === -1) {
-              if (mainTrunk.has(pk)) {
-                pkTargetLaneIdx = 0;
-                if (lanes[0] == null) {
-                  laneSet(0, pk);
+            if (targetLaneIdx === -1) {
+              // Check if pk is first parent of some other active commit
+              let otherBranchChildLaneIdx = -1;
+              for (let i = 0; i < lanes.length; i++) {
+                const activeHash = lanes[i];
+                if (activeHash) {
+                  const activeCommit = hashToCommitMap.get(activeHash);
+                  if (activeCommit && activeCommit.parents && activeCommit.parents[0] === pk) {
+                    otherBranchChildLaneIdx = i;
+                    break;
+                  }
                 }
+              }
+
+              if (otherBranchChildLaneIdx !== -1) {
+                targetLaneIdx = otherBranchChildLaneIdx;
               } else {
-                // 不复用已占用的 slot，防重叠（从 lane 1 开始找）
-                let emptySlot = -1;
-                for (let s = 1; s < lanes.length; s++) {
-                  if (lanes[s] === null && s !== laneIdx) { emptySlot = s; break; }
-                }
-                if (emptySlot === -1) {
-                  pkTargetLaneIdx = lanes.length === 0 ? 1 : lanes.length;
-                  while (lanes.length < pkTargetLaneIdx) { lanePushNull(); }
-                  lanePush(pk);
+                if (mainTrunk.has(pk)) {
+                  targetLaneIdx = 0;
+                  lanes[0] = pk;
                 } else {
-                  pkTargetLaneIdx = emptySlot;
-                  laneSet(emptySlot, pk);
+                  // Allocate new lane for pk
+                  targetLaneIdx = getEmptyLaneIndex(false);
+                  lanes[targetLaneIdx] = pk;
                 }
               }
             }
 
             lines.push({
-              fromRow: r, fromLane: laneIdx,
-              toRow: r + 1, toLane: pkTargetLaneIdx,
-              colorIdx: pkTargetLaneIdx,
+              fromRow: r,
+              fromLane: laneIdx,
+              toRow: pkRow,
+              toLane: targetLaneIdx,
+              runningLane: targetLaneIdx,
+              toHash: pk,
+              colorIdx: targetLaneIdx,
               isMergeLine: true
             });
           } else {
+            // Secondary parent not loaded
             const tempLane = laneIdx + 1;
             lines.push({
-              fromRow: r, fromLane: laneIdx,
-              toRow: r + 0.5, toLane: tempLane,
-              colorIdx: laneIdx, fade: true
+              fromRow: r,
+              fromLane: laneIdx,
+              toRow: r + 0.5,
+              toLane: tempLane,
+              runningLane: tempLane,
+              colorIdx: laneIdx,
+              fade: true
             });
           }
         }
       }
 
-      // 穿过线（经过此行但未停留的分支线）
-      for (let j = 0; j < incomingLanes.length; j++) {
-        const h = incomingLanes[j];
-        if (h && j !== laneIdx) {
-          const nextLaneIdx = laneIndexOf(h); // O(1)
-          if (nextLaneIdx !== -1) {
-            lines.push({
-              fromRow: r, fromLane: j,
-              toRow: r + 1, toLane: nextLaneIdx,
-              colorIdx: j
-            });
-          }
-        }
-      }
-
-      // 清理尾部空 lanes（null 不在 Map 中，无需额外清理）
+      // Trim trailing nulls
       while (lanes.length > 0 && lanes[lanes.length - 1] === null) {
         lanes.pop();
       }
@@ -841,6 +857,8 @@
         ? { name: branchLabel.name, color: laneColor }
         : { name: null, color: laneColor };
     });
+
+
 
     // 动态图表宽度
     const computedGraphWidth = paddingLeft + (maxLanes + 1) * laneWidth;
@@ -1053,9 +1071,11 @@
 
     // ─── 3. 渲染 SVG 连线 ─────────
     cachedLines.forEach(line => {
-      const x1 = paddingLeft + line.fromLane * laneWidth;
+      const x_from = paddingLeft + line.fromLane * laneWidth;
+      const x_run = paddingLeft + (line.runningLane !== undefined ? line.runningLane : line.fromLane) * laneWidth;
+      const x_to = paddingLeft + line.toLane * laneWidth;
+
       const y1 = getYCoordinate(line.fromRow);
-      const x2 = paddingLeft + line.toLane * laneWidth;
       const y2 = getYCoordinate(line.toRow);
       const color = colors[line.colorIdx % colors.length];
       const laneClass = `lane-${line.colorIdx % colors.length}`;
@@ -1063,29 +1083,54 @@
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('class', laneClass);
       
-      if (line.fromLane === line.toLane) {
-        if (line.fade) {
+      if (line.fade) {
+        if (line.fromLane === line.toLane) {
           const fadeLen = 12;
-          path.setAttribute('d', `M ${x1} ${y1} L ${x1} ${y1 + fadeLen}`);
+          path.setAttribute('d', `M ${x_from} ${y1} L ${x_from} ${y1 + fadeLen}`);
           path.setAttribute('stroke-dasharray', '2,2');
           path.setAttribute('opacity', '0.4');
         } else {
-          path.setAttribute('d', `M ${x1} ${y1} L ${x2} ${y2}`);
+          const fadeLen = 12;
+          const yStart = y1 + 2;
+          const yEnd = y1 + fadeLen - 2;
+          const cpY = y1 + fadeLen / 2;
+          path.setAttribute('d', `M ${x_from} ${y1} L ${x_from} ${yStart} C ${x_from} ${cpY}, ${x_to} ${cpY}, ${x_to} ${yEnd} L ${x_to} ${y1 + fadeLen}`);
+          path.setAttribute('stroke-dasharray', '2,2');
+          path.setAttribute('opacity', '0.4');
         }
       } else {
-        if (line.fade) {
-          const fadeLen = 12;
-          const controlY1 = y1 + 4;
-          const controlY2 = y1 + fadeLen - 4;
-          path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${controlY1}, ${x2} ${controlY2}, ${x2} ${y1 + fadeLen}`);
-          path.setAttribute('stroke-dasharray', '2,2');
-          path.setAttribute('opacity', '0.4');
-        } else {
-          const cpOffset = 8; // Tighter, metro-style transit curves (aligned with GitLens)
-          const controlY1 = y1 + cpOffset;
-          const controlY2 = y2 - cpOffset;
-          path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${controlY1}, ${x2} ${controlY2}, ${x2} ${y2}`);
+        // General Metro-style path with runningLane in the middle
+        const curveHeight = Math.min(rowHeight * 0.7, (y2 - y1) * 0.35);
+        
+        let d = `M ${x_from} ${y1}`;
+        
+        // 1. Top transition from x_from to x_run
+        if (x_from !== x_run) {
+          const yStart = y1 + rowHeight * 0.15;
+          const yEnd = yStart + curveHeight;
+          const cpY = yStart + curveHeight * 0.5;
+          d += ` L ${x_from} ${yStart} C ${x_from} ${cpY}, ${x_run} ${cpY}, ${x_run} ${yEnd}`;
         }
+        
+        // 2. Bottom transition from x_run to x_to
+        if (x_run !== x_to) {
+          const yEnd = y2 - rowHeight * 0.15;
+          const yStart = yEnd - curveHeight;
+          const cpY = yStart + curveHeight * 0.5;
+          
+          // Connect the end of top transition (or start if no top transition) to the start of bottom transition
+          const yStartVal = (x_from !== x_run) ? (y1 + rowHeight * 0.15 + curveHeight) : y1;
+          if (yStart > yStartVal) {
+            d += ` L ${x_run} ${yStart}`;
+          }
+          d += ` C ${x_run} ${cpY}, ${x_to} ${cpY}, ${x_to} ${yEnd} L ${x_to} ${y2}`;
+        } else {
+          // No bottom transition, just run straight to y2
+          const yStartVal = (x_from !== x_run) ? (y1 + rowHeight * 0.15 + curveHeight) : y1;
+          d += ` L ${x_run} ${y2}`;
+        }
+        
+        path.setAttribute('d', d);
       }
       
       path.setAttribute('stroke', color);
