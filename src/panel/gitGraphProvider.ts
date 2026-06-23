@@ -15,7 +15,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly _extensionUri: vscode.Uri,
     private readonly _getCwd: () => string | undefined
-  ) {}
+  ) { }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -73,7 +73,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
             const [branches, remoteBranches, authors, commits] = await Promise.all([
               getBranches(gitRoot),
-              execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out => 
+              execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out =>
                 out.split('\n').map(b => b.trim()).filter(Boolean)
               ).catch(() => []),
               getAuthors(gitRoot, signal),
@@ -124,7 +124,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
               // Get branches and authors to keep dropdowns in sync
               const [branches, remoteBranches, authors] = await Promise.all([
                 getBranches(gitRoot),
-                execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot).then(out => 
+                execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot).then(out =>
                   out.split('\n').map(b => b.trim()).filter(Boolean)
                 ).catch(() => []),
                 getAuthors(gitRoot)
@@ -184,7 +184,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
                 }
               }
             });
-            
+
             webviewView.webview.postMessage({
               type: 'commitDetail',
               hash: data.hash,
@@ -263,7 +263,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             query: JSON.stringify({ path: absoluteFilePath, ref: hash })
           });
           const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
-          
+
           await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
           break;
         }
@@ -315,7 +315,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
               const leftUri = vscode.Uri.from({
                 scheme: 'git',
                 path: absoluteFilePath,
-                query: JSON.stringify({ path: absoluteFilePath, ref: parentHash || 'empty' })
+                query: JSON.stringify({ path: absoluteFilePath, ref: parentHash === 'empty' ? '~' : parentHash })
               });
               const rightUri = vscode.Uri.from({
                 scheme: 'git',
@@ -337,7 +337,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private _getHtmlForWebview(webview: vscode.WebviewView.prototype['webview']): string {
+  private _getHtmlForWebview(webview: vscode.Webview): string {
     const htmlPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'panel.html');
     let html = fs.readFileSync(htmlPath.fsPath, 'utf8');
 
@@ -357,7 +357,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   }
 
   public refresh() {
-    if (this._view) {
+    if (this._view && this._view.visible) {
       this._view.webview.postMessage({ type: 'refresh' });
     }
   }
@@ -407,14 +407,14 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           if (fs.existsSync(filePath)) {
             try {
               watchers.push(fs.watch(filePath, () => this._triggerDebouncedRefresh()));
-            } catch (e) {}
+            } catch (e) { }
           }
         }
         const refsPath = path.join(gitDir, 'refs');
         if (fs.existsSync(refsPath)) {
           try {
             watchers.push(fs.watch(refsPath, () => this._triggerDebouncedRefresh()));
-          } catch (e) {}
+          } catch (e) { }
         }
         this._gitWatcher = {
           close: () => {
@@ -441,7 +441,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     if (this._gitWatcher) {
       try {
         this._gitWatcher.close();
-      } catch (e) {}
+      } catch (e) { }
       this._gitWatcher = undefined;
     }
     if (this._debounceTimer) {

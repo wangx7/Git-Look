@@ -72,6 +72,8 @@
   const branchColorMap = new Map();
   let currentStatsData = null;  // latest CodeStats from backend
   let currentFocusedAuthor = null; // author name for author-detail state
+  let commitBranchLabel = {};   // hash → {name, color}
+  let isOverlayMode = false;    // whether in narrow/overlay layout mode
 
   // Right pane state machine
   const RightPaneState = { OVERVIEW: 'overview', COMMIT: 'commit', AUTHOR: 'author', LOADING: 'loading' };
@@ -92,6 +94,11 @@
       detailsContent.classList.remove('hidden');
     } else if (state === RightPaneState.AUTHOR) {
       authorStatsPane.classList.remove('hidden');
+    }
+
+    // In overlay (narrow) mode, automatically reveal the details panel
+    if (isOverlayMode && state !== RightPaneState.LOADING) {
+      openOverlay();
     }
   }
 
@@ -269,7 +276,8 @@
   function loadNextPage() {
     if (isFetching || !hasMoreCommits) return;
     isFetching = true;
-    
+    showLoading();
+
     const filters = getFilters();
 
     vscode.postMessage({ command: 'loadData', filters, page: currentPage + 1 });
@@ -786,7 +794,7 @@
     // 优先用本地分支名，没有则用 remote 分支名（去掉 origin/ 前缀），
     // 没有 decoration 的提交继承该 lane 上一个已知的分支名。
     const laneCurrentBranch = {}; // lane → {name, color}
-    window._commitBranchLabel = {}; // hash → {name, color}
+    commitBranchLabel = {}; // hash → {name, color}
     commits.forEach(c => {
       const node = commitNodes[c.hash];
       if (!node) return;
@@ -829,7 +837,7 @@
 
       // 取该 lane 已知的分支名（可能是继承自上方的提交）
       const branchLabel = laneCurrentBranch[lane] || null;
-      window._commitBranchLabel[c.hash] = branchLabel
+      commitBranchLabel[c.hash] = branchLabel
         ? { name: branchLabel.name, color: laneColor }
         : { name: null, color: laneColor };
     });
@@ -927,7 +935,7 @@
         // 列表页小头像计算
         const authorColor = getAvatarColor(c.author);
         const authorInitials = getInitials(c.author);
-        const authorAvatarHtml = `<span class="avatar-circle" style="background-color: ${authorColor}; width: 14px; height: 14px; font-size: 8px; margin-right: 5px; display: inline-flex; vertical-align: middle; line-height: 14px; border: none; box-shadow: none;">${authorInitials}</span>`;
+        const authorAvatarHtml = `<span class="avatar-circle" style="background-color: ${authorColor}; width: 14px; height: 14px; font-size: 8px; margin-right: 5px; display: inline-flex; vertical-align: middle; line-height: 14px; border: none; box-shadow: none;">${escapeHtml(authorInitials)}</span>`;
 
         tr.innerHTML = `
           <td class="graph-col" style="width: ${computedGraphWidth}px; min-width: ${computedGraphWidth}px;"></td>
@@ -1221,7 +1229,7 @@
       }
 
       // 补充 lane 推断的分支名（仅当该分支名尚未在 decorations 中出现时）
-      const laneBranch = window._commitBranchLabel && window._commitBranchLabel[hash];
+      const laneBranch = commitBranchLabel[hash];
       if (laneBranch && laneBranch.name) {
         const alreadyShown = commit.decorations && commit.decorations.includes(laneBranch.name);
         if (!alreadyShown) {
@@ -1560,14 +1568,8 @@
       }
     } else {
       showLoading();
-      const filters = {
-        branch: branchSelect.value || undefined,
-        author: authorSelect.value || undefined,
-        since: sinceDate.value || undefined,
-        until: untilDate.value || undefined,
-        query: searchInput.value.trim() || undefined
-      };
-      vscode.postMessage({ command: 'locateCommit', hash, filters });
+      // Use getFilters() so date presets (24h, 7d) are converted to real dates
+      vscode.postMessage({ command: 'locateCommit', hash, filters: getFilters() });
     }
   }
 
@@ -1801,7 +1803,7 @@
     const areaPath = linePath + ` L ${pts[pts.length - 1].x.toFixed(2)} ${baseY} L ${pts[0].x.toFixed(2)} ${baseY} Z`;
 
     const ns = 'http://www.w3.org/2000/svg';
-    const gradId = 'activity-grad-' + Math.random().toString(36).slice(2);
+    const gradId = 'activity-chart-gradient';
 
     // Gradient def
     const defs = document.createElementNS(ns, 'defs');
@@ -1928,9 +1930,21 @@
 
       tooltip.style.display = 'block';
       tooltip.innerHTML = `<span style="opacity:0.6;font-size:10px;">${d.date}</span><br><strong style="color:var(--accent);">${d.count}</strong> 次提交<br><span style="opacity:0.55;font-size:9.5px;">点击筛选此日</span>`;
-      // Position tooltip
-      const tx = e.clientX + 12;
-      const ty = e.clientY - 48;
+      // Position tooltip with boundary checks
+      const tw = tooltip.offsetWidth;
+      const th = tooltip.offsetHeight;
+      const margin = 12;
+      
+      let tx = e.clientX + margin;
+      let ty = e.clientY - th - 8; // 8px above cursor
+
+      if (tx + tw > window.innerWidth) {
+        tx = e.clientX - tw - margin;
+      }
+      if (ty < 0) {
+        ty = e.clientY + margin;
+      }
+
       tooltip.style.left = tx + 'px';
       tooltip.style.top = ty + 'px';
     });
@@ -2023,10 +2037,11 @@
       const count = wd[dayIdx] || 0;
       const heightPct = Math.max(4, Math.round((count / maxWd) * 100));
       const col = document.createElement('div');
-      col.className = 'weekday-col';
+      col.className = 'weekday-col custom-tooltip-container';
       col.innerHTML = `
-        <div class="weekday-bar" style="height:${heightPct}%;background-color:${color};opacity:0.65;" title="${orderLabels[i]}: ${count}次"></div>
+        <div class="weekday-bar" style="height:${heightPct}%;background-color:${color};opacity:0.65;"></div>
         <span class="weekday-label">${orderLabels[i]}</span>
+        <div class="custom-tooltip">${orderLabels[i]}: ${count}次</div>
       `;
       weekdayChart.appendChild(col);
     });
@@ -2109,11 +2124,11 @@
   }
 
   // ── 窄屏 Overlay 模式：监听整体 main-layout 宽度 ──
+  // isOverlayMode is declared at the top with other state variables
   const mainLayoutEl = document.querySelector('.main-layout');
   const overlayBackdrop = document.getElementById('overlay-backdrop');
   const overlayCloseBtn = document.getElementById('overlay-close-btn');
   const OVERLAY_BREAKPOINT = 550;
-  let isOverlayMode = false;
 
   function openOverlay() {
     detailsPane.classList.add('overlay-open');
@@ -2132,17 +2147,7 @@
     overlayCloseBtn.addEventListener('click', closeOverlay);
   }
 
-  // 原始的 setRightPane 逻辑：在 overlay 模式下，自动打开面板
-  const _origSetRightPane = setRightPane;
-  // 重新包装 setRightPane：在窄屏时选中提交或切换到 OVERVIEW/AUTHOR 时自动打开 overlay
-  function setRightPaneWithOverlay(state) {
-    _origSetRightPane(state);
-    if (isOverlayMode && state !== RightPaneState.LOADING) {
-      openOverlay();
-    }
-  }
-  // 替换全局引用（仅对后续调用有效）
-  // 由于 JS 闭包，这里改为直接在 ResizeObserver 回调中打 patch
+  // setRightPane already handles overlay via isOverlayMode (see top of file)
   if (mainLayoutEl && window.ResizeObserver) {
     const layoutObserver = new ResizeObserver(entries => {
       const w = entries[0].contentRect.width;
@@ -2160,6 +2165,19 @@
       }
     });
     layoutObserver.observe(mainLayoutEl);
+  }
+
+  if (activitySvg && window.ResizeObserver) {
+    let resizeTimer = null;
+    const chartObserver = new ResizeObserver(() => {
+      if (resizeTimer) cancelAnimationFrame(resizeTimer);
+      resizeTimer = requestAnimationFrame(() => {
+        if (currentStatsData && currentStatsData.dailyActivity) {
+          renderActivityChart(currentStatsData.dailyActivity);
+        }
+      });
+    });
+    chartObserver.observe(activitySvg.parentElement);
   }
 
   // 在 overlay 模式下，点击提交行 → 打开面板

@@ -2,12 +2,19 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { GitGraphProvider } from './panel/gitGraphProvider';
-import { execGit, execGitBuffer, traceLineHistory } from './gitHelper';
+import { execGit, traceLineHistory, hasLocalModifications } from './gitHelper';
 import { BlameAnnotationsManager } from './blameAnnotations';
 
-
-
 export function activate(context: vscode.ExtensionContext) {
+  // Register a dummy document content provider for the git-visual scheme
+  // so that VS Code can resolve git-visual URIs (used for custom labels in multi-diff editors).
+  const docProvider = vscode.workspace.registerTextDocumentContentProvider('git-visual', {
+    provideTextDocumentContent(): string {
+      return '';
+    }
+  });
+  context.subscriptions.push(docProvider);
+
   // Helper to get active workspace folder CWD
   const getCwd = () => {
     const editor = vscode.window.activeTextEditor;
@@ -51,10 +58,22 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     const filePath = document.uri.fsPath;
-    
+
+    let startRef: string | undefined = undefined;
+    if (document.uri.scheme === 'git') {
+      try {
+        const queryObj = JSON.parse(document.uri.query);
+      } catch (e) {
+        // Ignore
+      }
+    }
+
     // Get line ranges (convert 0-indexed to 1-indexed)
     const startLine = editor.selection.start.line + 1;
-    const endLine = editor.selection.end.line + 1;
+    let endLine = editor.selection.end.line + 1;
+    if (editor.selection.end.character === 0 && startLine !== endLine) {
+      endLine--;
+    }
 
     try {
       await vscode.window.withProgress({
@@ -62,60 +81,119 @@ export function activate(context: vscode.ExtensionContext) {
         title: "正在获取 Git 选区历史...",
         cancellable: false
       }, async () => {
-        const commits = await traceLineHistory(cwd, filePath, startLine, endLine);
-        if (commits.length === 0) {
+        const commits = await traceLineHistory(cwd, filePath, startLine, endLine, startRef);
+        // Check for local changes (uncommitted changes in the working tree) within the selected line range
+        const hasLocalChanges = !startRef && (await hasLocalModifications(cwd, filePath, startLine, endLine));
+
+        if (commits.length === 0 && !hasLocalChanges) {
           vscode.window.showInformationMessage('未找到该选区的历史记录');
           return;
         }
 
-        const relativePath = path.relative(cwd, filePath).replace(/\\/g, '/');
         const fileName = path.basename(filePath);
 
-        // Construct resourceList for vscode.changes Multi Diff Editor
-        const resourceList = commits.map(commit => {
-          const absoluteFilePath = filePath;
-          // 空树 hash：用于根提交（无 parent）时作为 original 侧
-          const emptyTreeRef = commit.parentHash || '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
-          const leftUri = vscode.Uri.from({
+        // The Git empty-tree hash — used as "parent" for root commits that have no parent
+        const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+        const resourceList: any[] = [];
+
+        // git log -L returns commits newest-first; keep that order so the
+        // multi-diff editor shows the latest change at the top.
+        const orderedCommits = commits;
+
+        for (const commit of orderedCommits) {
+          // Safely resolve the parent ref — parentHash may be the literal string 'empty'
+          // when traceLineHistory encounters a root commit (no actual parent).
+          let parentRef = (!commit.parentHash || commit.parentHash === 'empty')
+            ? EMPTY_TREE
+            : commit.parentHash;
+
+          // If the parent is not empty, check if the file actually existed in that parent commit.
+          // If the file did not exist (e.g. it was newly created in this commit),
+          // we must diff it against the EMPTY_TREE so VS Code can render the diff properly.
+          if (parentRef !== EMPTY_TREE) {
+            try {
+              let repoRoot = cwd;
+              try {
+                repoRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+              } catch (e) { }
+              const repoFilePath = path.relative(repoRoot, filePath).replace(/\\/g, '/');
+              await execGit(['cat-file', '-e', `${parentRef}:${repoFilePath}`], repoRoot);
+            } catch (e) {
+              parentRef = EMPTY_TREE;
+            }
+          }
+
+          // File as it existed in the parent commit (older state → LEFT side)
+          let parentHashDisplay = parentRef === EMPTY_TREE ? 'Empty Tree' : parentRef.substring(0, 7);
+          const originalLabel = `/[${parentHashDisplay}]/${fileName}`;
+          const originalUri = vscode.Uri.from({
             scheme: 'git',
-            path: absoluteFilePath,
-            query: JSON.stringify({
-              path: absoluteFilePath,
-              ref: emptyTreeRef
-            })
+            path: originalLabel,
+            query: JSON.stringify({ path: filePath, ref: parentRef })
           });
 
-          const rightUri = vscode.Uri.from({
-            scheme: 'git',
-            path: absoluteFilePath,
-            query: JSON.stringify({
-              path: absoluteFilePath,
-              ref: commit.hash
-            })
+          // Construct a dummy label URI to satisfy the 3-element tuple requirement of vscode.changes
+          const labelUri = vscode.Uri.from({
+            scheme: 'git-visual',
+            path: '/dummy',
+            query: ''
           });
 
-          const cleanMsg = commit.message.replace(/[\/\?#\\:\*]/g, ' ').trim();
-          const customPath = '/' + [
-            commit.hash.substring(0, 7),
-            commit.author,
-            cleanMsg,
-            path.basename(filePath)
-          ].join(' | ');
+          // File as it became in this commit (newer state → RIGHT side)
+          // We put the commit info in a pseudo-directory so the basename matches the real file, preserving syntax highlighting.
+          const cleanMessage = commit.message.replace(/[\r\n]+/g, ' ').substring(0, 30);
+          const modifiedLabel = `/[${commit.hash.substring(0, 7)}] ${cleanMessage}/${fileName}`;
+
+          const modifiedUri = vscode.Uri.from({
+            scheme: 'git',
+            path: modifiedLabel,
+            query: JSON.stringify({ path: filePath, ref: commit.hash })
+          });
+          // vscode.changes tuple: [labelUri, originalUri, modifiedUri]
+          resourceList.push([labelUri, originalUri, modifiedUri]);
+        }
+
+        // Prepend working-tree (uncommitted) changes as the very first — i.e. newest — entry.
+        if (hasLocalChanges) {
+          const latestRef = commits[0]?.hash ?? 'HEAD';
+          const headLabel = `/[${latestRef.substring(0, 7)}]/${fileName}`;
+          const headUri = vscode.Uri.from({
+            scheme: 'git',
+            path: headLabel,
+            query: JSON.stringify({ path: filePath, ref: latestRef })
+          });
+          const workingTreeUri = vscode.Uri.file(filePath);
 
           const labelUri = vscode.Uri.from({
-            scheme: 'git',
-            path: customPath,
-            query: JSON.stringify({
-              path: absoluteFilePath,
-              ref: commit.hash
-            })
+            scheme: 'git-visual',
+            path: '/dummy',
+            query: ''
           });
 
-          return [leftUri, rightUri, labelUri];
-        });
+          // For local working tree changes, we pass the actual file URI so it remains editable.
+          resourceList.unshift([labelUri, headUri, workingTreeUri]);
+        }
 
-        const title = `Git 选区历史: ${fileName} (L${startLine}-L${endLine})`;
+        const title = `Git 选区历史: ${fileName} (L${startLine}–L${endLine})`;
         await vscode.commands.executeCommand('vscode.changes', title, resourceList);
+
+        // After the multi-diff editor opens, reveal the selected line range so the
+        // user lands directly on the relevant change instead of the top of the file.
+        // We retry a few times because the diff editor may take a moment to become active.
+        const targetRange = new vscode.Range(
+          new vscode.Position(Math.max(0, startLine - 2), 0),
+          new vscode.Position(endLine - 1, 0)
+        );
+        let revealed = false;
+        for (let attempt = 0; attempt < 6 && !revealed; attempt++) {
+          await new Promise(r => setTimeout(r, 200 + attempt * 150));
+          const activeEditor = vscode.window.activeTextEditor;
+          if (activeEditor) {
+            activeEditor.revealRange(targetRange, vscode.TextEditorRevealType.InCenter);
+            revealed = true;
+          }
+        }
       });
     } catch (err: any) {
       vscode.window.showErrorMessage(`获取选区历史失败: ${err.message}`);
@@ -143,7 +221,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    if (!uri || uri.scheme !== 'git') {
+    if (!uri || (uri.scheme !== 'git' && uri.scheme !== 'git-visual')) {
       return;
     }
 
@@ -161,18 +239,26 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     let relativePath = '';
-    if (uri.scheme === 'git') {
+    if (uri.query) {
       try {
         const queryObj = JSON.parse(uri.query);
-        relativePath = queryObj.path;
+        if (queryObj && queryObj.path) {
+          relativePath = queryObj.path;
+        }
       } catch (e) {
-        relativePath = uri.path;
+        // Ignore
       }
-    } else {
-      relativePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
-      const parts = relativePath.split(' | ');
-      if (parts.length > 1) {
-        relativePath = parts[parts.length - 1];
+    }
+
+    if (!relativePath) {
+      if (uri.scheme === 'git') {
+        relativePath = uri.path;
+      } else {
+        relativePath = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
+        const parts = relativePath.split(' | ');
+        if (parts.length > 1) {
+          relativePath = parts[parts.length - 1];
+        }
       }
     }
 
@@ -193,179 +279,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(openWorkspaceFileCommand);
 
-  // 5. Blame status bar integration for git-visual files
-  const outputChannel = vscode.window.createOutputChannel('Git 可视化');
-  outputChannel.appendLine('[Git 可视化] Status bar blame integration initialized');
 
-  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  context.subscriptions.push(statusBarItem);
-
-  let currentBlameToken: any = null;
-
-  function formatDate(timestampSeconds: number): string {
-    const date = new Date(timestampSeconds * 1000);
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-
-  async function updateBlameStatusBar(editor: vscode.TextEditor | undefined) {
-    if (!editor) {
-      outputChannel.appendLine('[Git 可视化] updateBlameStatusBar: no active editor');
-      statusBarItem.hide();
-      return;
-    }
-
-    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: active editor scheme = "${editor.document.uri.scheme}", path = "${editor.document.uri.path}"`);
-
-    if (editor.document.uri.scheme !== 'git') {
-      statusBarItem.hide();
-      return;
-    }
-
-    const uri = editor.document.uri;
-    let commitHash = '';
-    let filePath = '';
-    if (uri.scheme === 'git') {
-      try {
-        const queryObj = JSON.parse(uri.query);
-        commitHash = queryObj.ref;
-        filePath = queryObj.path;
-      } catch (e) {
-        // Fallback
-      }
-    }
-
-    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: commitHash = "${commitHash}"`);
-    if (!commitHash || commitHash === 'empty') {
-      statusBarItem.hide();
-      return;
-    }
-
-    const line = editor.selection.active.line + 1; // 1-based line number
-    const cwd = getCwd();
-    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: line = ${line}, raw filePath = "${filePath}", cwd = "${cwd}"`);
-    if (!cwd) {
-      statusBarItem.hide();
-      return;
-    }
-
-    // Resolve Git root and compute repository-relative path
-    let gitRoot = cwd;
-    try {
-      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-    } catch (e) {
-      // Ignore
-    }
-
-    const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.resolve(gitRoot, filePath);
-    const repoFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
-    outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: resolved gitRoot = "${gitRoot}", repoFilePath = "${repoFilePath}"`);
-
-    const token = {};
-    currentBlameToken = token;
-
-    try {
-      // Run git blame for that specific line at that commit
-      outputChannel.appendLine(`[Git 可视化] Running: git blame -L ${line},${line} --porcelain ${commitHash} -- ${repoFilePath} (in ${gitRoot})`);
-      const output = await execGit([
-        'blame',
-        '-L',
-        `${line},${line}`,
-        '--porcelain',
-        commitHash,
-        '--',
-        repoFilePath
-      ], gitRoot);
-
-      if (currentBlameToken !== token) {
-        outputChannel.appendLine('[Git 可视化] updateBlameStatusBar: token mismatch (outdated request)');
-        return; // Outdated request
-      }
-
-      if (!output) {
-        outputChannel.appendLine('[Git 可视化] updateBlameStatusBar: git blame returned empty output');
-        statusBarItem.hide();
-        return;
-      }
-
-      // Parse porcelain output
-      const lines = output.split('\n');
-      if (lines.length < 4) {
-        outputChannel.appendLine('[Git 可视化] updateBlameStatusBar: parsed output lines too short');
-        statusBarItem.hide();
-        return;
-      }
-
-      const firstLineParts = lines[0].split(' ');
-      const blamedCommitHash = firstLineParts[0];
-
-      let author = 'Unknown';
-      let authorTime = 0;
-      let summary = '';
-
-      for (const l of lines) {
-        if (l.startsWith('author ')) {
-          author = l.substring(7).trim();
-        } else if (l.startsWith('author-time ')) {
-          authorTime = parseInt(l.substring(12).trim(), 10) || 0;
-        } else if (l.startsWith('summary ')) {
-          summary = l.substring(8).trim();
-        }
-      }
-
-      if (blamedCommitHash.startsWith('00000000')) {
-        statusBarItem.text = `$(git-commit) 未提交的更改`;
-        statusBarItem.tooltip = `当前行有未提交的更改`;
-        statusBarItem.command = undefined;
-      } else {
-        const dateStr = formatDate(authorTime);
-        statusBarItem.text = `$(git-commit) ${author}, ${dateStr} • ${summary}`;
-        statusBarItem.tooltip = `提交: ${blamedCommitHash}\n作者: ${author}\n时间: ${new Date(authorTime * 1000).toLocaleString()}\n信息: ${summary}\n\n点击在 Graph 中定位此提交`;
-        
-        statusBarItem.command = {
-          title: '定位提交',
-          command: 'git-visual.focusCommitFromBlame',
-          arguments: [blamedCommitHash]
-        };
-      }
-      outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar: showing status bar text: "${statusBarItem.text}"`);
-      statusBarItem.show();
-    } catch (err: any) {
-      outputChannel.appendLine(`[Git 可视化] updateBlameStatusBar error: ${err.message || err}`);
-      if (currentBlameToken === token) {
-        statusBarItem.hide();
-      }
-    }
-  }
-
-  // Register focus commit command
-  const focusBlameCmd = vscode.commands.registerCommand('git-visual.focusCommitFromBlame', (hash: string) => {
-    gitGraphProvider.focusCommit(hash);
-  });
-  context.subscriptions.push(focusBlameCmd);
-
-  // Listen for selection & editor changes
-  vscode.window.onDidChangeActiveTextEditor(editor => {
-    updateBlameStatusBar(editor);
-  }, null, context.subscriptions);
-
-  let blameSelectionDebounce: ReturnType<typeof setTimeout> | undefined;
-  vscode.window.onDidChangeTextEditorSelection(event => {
-    if (event.textEditor === vscode.window.activeTextEditor) {
-      if (blameSelectionDebounce) {
-        clearTimeout(blameSelectionDebounce);
-      }
-      // 防抖 300ms，避免光标每次移动都触发 git blame 子进程
-      blameSelectionDebounce = setTimeout(() => {
-        updateBlameStatusBar(event.textEditor);
-      }, 300);
-    }
-  }, null, context.subscriptions);
-
-  // Trigger initial blame update
-  updateBlameStatusBar(vscode.window.activeTextEditor);
 }
 
-export function deactivate() {}
+export function deactivate() { }

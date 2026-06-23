@@ -21,6 +21,7 @@ export interface DiffLine {
 export interface CommitDiff {
   hash: string;
   parentHash: string;
+  parents?: string[];
   author: string;
   email: string;
   timestamp: number;
@@ -326,11 +327,57 @@ function parseCommitLine(line: string): CommitInfo | null {
   return { hash, parents, author, email, timestamp, decorations, message };
 }
 
+export async function hasLocalModifications(
+  cwd: string,
+  filePath: string,
+  startLine: number,
+  endLine: number
+): Promise<boolean> {
+  try {
+    let gitRoot = cwd;
+    try {
+      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+    } catch (e) {
+      // Ignore
+    }
+    const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
+    const diffOutput = await execGit(['diff', '-U0', 'HEAD', '--', repoFilePath], gitRoot);
+    if (!diffOutput.trim()) {
+      return false;
+    }
+    
+    const lines = diffOutput.split('\n');
+    for (const line of lines) {
+      const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (match) {
+        const newStart = parseInt(match[3], 10);
+        const newLength = match[4] !== undefined ? parseInt(match[4], 10) : 1;
+        
+        let isOverlap = false;
+        if (newLength > 0) {
+          isOverlap = newStart <= endLine && (newStart + newLength - 1) >= startLine;
+        } else {
+          isOverlap = newStart >= startLine - 1 && newStart <= endLine;
+        }
+        
+        if (isOverlap) {
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch (e) {
+    console.error('Error checking local modifications:', e);
+    return false;
+  }
+}
+
 export async function traceLineHistory(
   cwd: string,
   filePath: string,
   startLine: number,
   endLine: number,
+  startRef?: string,
   signal?: AbortSignal
 ): Promise<CommitDiff[]> {
   let gitRoot = cwd;
@@ -342,14 +389,71 @@ export async function traceLineHistory(
 
   const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
 
-  const args = [
-    'log',
+  let mappedStart = startLine;
+  let mappedEnd = endLine;
+
+  // Map working tree line numbers to HEAD line numbers if tracing from working tree
+  if (!startRef) {
+    try {
+      const diffOutput = await execGit(['diff', '-U0', 'HEAD', '--', repoFilePath], gitRoot, signal);
+      if (diffOutput.trim()) {
+        const lines = diffOutput.split('\n');
+        interface Hunk { oldStart: number; oldLength: number; newStart: number; newLength: number; }
+        const hunks: Hunk[] = [];
+        
+        for (const line of lines) {
+          const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+          if (match) {
+            hunks.push({
+              oldStart: parseInt(match[1], 10),
+              oldLength: match[2] !== undefined ? parseInt(match[2], 10) : 1,
+              newStart: parseInt(match[3], 10),
+              newLength: match[4] !== undefined ? parseInt(match[4], 10) : 1
+            });
+          }
+        }
+
+        const mapLine = (line: number, hunks: Hunk[], isEnd: boolean): number => {
+          let offset = 0;
+          for (const hunk of hunks) {
+            const newEnd = hunk.newStart + hunk.newLength - 1;
+            if (line < hunk.newStart) {
+              return line - offset;
+            }
+            if (line <= newEnd) {
+              return isEnd 
+                ? Math.max(1, hunk.oldStart + hunk.oldLength - 1)
+                : Math.max(1, hunk.oldStart);
+            }
+            offset += (hunk.newLength - hunk.oldLength);
+          }
+          return line - offset;
+        };
+
+        mappedStart = Math.max(1, mapLine(startLine, hunks, false));
+        mappedEnd = Math.max(1, mapLine(endLine, hunks, true));
+      }
+    } catch (e) {
+      console.warn('Error adjusting for local diffs:', e);
+    }
+  }
+
+  // If mappedStart > mappedEnd, it means the selected range consists entirely of newly inserted lines
+  // that do not exist in HEAD at all. History is empty.
+  if (mappedStart > mappedEnd) {
+    return [];
+  }
+
+  const args = ['log'];
+  if (startRef) {
+    args.push(startRef);
+  }
+  args.push(
     `-L`,
-    `${startLine},${endLine}:${repoFilePath}`,
-    '-w', // ignore whitespaces to skip formatting commits
+    `${mappedStart},${mappedEnd}:${repoFilePath}`,
     '--date=raw',
     '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s'
-  ];
+  );
 
   try {
     const output = await execGit(args, gitRoot, signal);
@@ -371,11 +475,13 @@ export async function traceLineHistory(
         const timestamp = parseInt(parts[4], 10);
         const message = parts.slice(5).join('\x1f');
 
-        const parentHash = parentsStr.split(' ')[0] || 'empty';
+        const parents = parentsStr.split(' ').filter(p => p.trim().length > 0);
+        const parentHash = parents[0] || 'empty';
 
         currentCommit = {
           hash,
           parentHash,
+          parents,
           author,
           email,
           timestamp,
@@ -387,12 +493,9 @@ export async function traceLineHistory(
           line.startsWith('diff --git') ||
           line.startsWith('---') ||
           line.startsWith('+++') ||
-          line.startsWith('index ')
+          line.startsWith('index ') ||
+          line.startsWith('@@ ')
         ) {
-          continue;
-        }
-        
-        if (line.startsWith('@@ ')) {
           continue;
         }
         
@@ -413,7 +516,37 @@ export async function traceLineHistory(
       commits.push(currentCommit);
     }
 
-    return commits;
+    // Resolve correct parent hash for merge commits asynchronously
+    for (const commit of commits) {
+      if (commit.parents && commit.parents.length > 1) {
+        for (const parent of commit.parents) {
+          try {
+            const diffOutput = await execGit(['diff', '--name-only', parent, commit.hash, '--', repoFilePath], gitRoot);
+            if (diffOutput.trim()) {
+              commit.parentHash = parent;
+              break;
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+      }
+    }
+
+    // Filter out commits that have no actual additions or deletions or only whitespace changes
+    return commits.filter(c => {
+      const hasAddedOrDeleted = c.diffLines.some(l => l.type === 'added' || l.type === 'deleted');
+      if (!hasAddedOrDeleted) {
+        return false;
+      }
+      const clean = (text: string) => text.replace(/\s+/g, '');
+      const deletedText = clean(c.diffLines.filter(l => l.type === 'deleted').map(l => l.text).join(''));
+      const addedText = clean(c.diffLines.filter(l => l.type === 'added').map(l => l.text).join(''));
+      if (deletedText === addedText) {
+        return false;
+      }
+      return true;
+    });
   } catch (e: any) {
     if (e.message === 'ABORTED') {
       throw e;
@@ -453,110 +586,123 @@ export async function getCodeStats(
   }
   args.push(`--since=${effectiveSince}`, `--until=${effectiveUntilVal}`);
 
-  const output = await execGit(args, cwd, signal);
-  const lines = output.split('\n');
+  let output: string;
+  try {
+    output = await execGit(args, cwd, signal);
+  } catch (e: any) {
+    if (e.message === 'ABORTED') { throw e; }
+    console.error('Error running git log for getCodeStats:', e);
+    throw e;
+  }
 
-  const authorMap = new Map<string, {
-    email: string;
-    commits: number;
-    additions: number;
-    deletions: number;
-    weekdays: number[];
-    fileMap: Map<string, number>;
-  }>();
-  const dailyMap = new Map<string, number>();
-  const fileMap = new Map<string, number>();
+  try {
+    const lines = output.split('\n');
 
-  let currentAuthor = '';
-  let currentEmail = '';
-  let currentTs = 0;
+    const authorMap = new Map<string, {
+      email: string;
+      commits: number;
+      additions: number;
+      deletions: number;
+      weekdays: number[];
+      fileMap: Map<string, number>;
+    }>();
+    const dailyMap = new Map<string, number>();
+    const fileMap = new Map<string, number>();
 
-  for (const line of lines) {
-    if (line.startsWith('COMMIT_STAT|')) {
-      const parts = line.split('|');
-      currentAuthor = parts[2];
-      currentEmail = parts[3];
-      currentTs = parseInt(parts[4], 10);
+    let currentAuthor = '';
+    let currentEmail = '';
+    let currentTs = 0;
 
-      if (!authorMap.has(currentAuthor)) {
-        authorMap.set(currentAuthor, {
-          email: currentEmail,
-          commits: 0,
-          additions: 0,
-          deletions: 0,
-          weekdays: [0, 0, 0, 0, 0, 0, 0],
-          fileMap: new Map()
-        });
-      }
-      const entry = authorMap.get(currentAuthor)!;
-      entry.commits++;
+    for (const line of lines) {
+      if (line.startsWith('COMMIT_STAT|')) {
+        const parts = line.split('|');
+        currentAuthor = parts[2];
+        currentEmail = parts[3];
+        currentTs = parseInt(parts[4], 10);
 
-      const d = new Date(currentTs * 1000);
-      entry.weekdays[d.getDay()]++;
-      const dateStr = d.toISOString().split('T')[0];
-      dailyMap.set(dateStr, (dailyMap.get(dateStr) || 0) + 1);
-
-    } else if (line.trim() && currentAuthor) {
-      const tabParts = line.split('\t');
-      if (tabParts.length >= 3) {
-        const adds = tabParts[0] === '-' ? 0 : (parseInt(tabParts[0], 10) || 0);
-        const dels = tabParts[1] === '-' ? 0 : (parseInt(tabParts[1], 10) || 0);
-        const filePath = tabParts[2];
-
+        if (!authorMap.has(currentAuthor)) {
+          authorMap.set(currentAuthor, {
+            email: currentEmail,
+            commits: 0,
+            additions: 0,
+            deletions: 0,
+            weekdays: [0, 0, 0, 0, 0, 0, 0],
+            fileMap: new Map()
+          });
+        }
         const entry = authorMap.get(currentAuthor)!;
-        entry.additions += adds;
-        entry.deletions += dels;
+        entry.commits++;
 
-        if (filePath) {
-          fileMap.set(filePath, (fileMap.get(filePath) || 0) + 1);
-          entry.fileMap.set(filePath, (entry.fileMap.get(filePath) || 0) + 1);
+        const d = new Date(currentTs * 1000);
+        entry.weekdays[d.getDay()]++;
+        const dateStr = d.toISOString().split('T')[0];
+        dailyMap.set(dateStr, (dailyMap.get(dateStr) || 0) + 1);
+
+      } else if (line.trim() && currentAuthor) {
+        const tabParts = line.split('\t');
+        if (tabParts.length >= 3) {
+          const adds = tabParts[0] === '-' ? 0 : (parseInt(tabParts[0], 10) || 0);
+          const dels = tabParts[1] === '-' ? 0 : (parseInt(tabParts[1], 10) || 0);
+          const filePath = tabParts[2];
+
+          const entry = authorMap.get(currentAuthor)!;
+          entry.additions += adds;
+          entry.deletions += dels;
+
+          if (filePath) {
+            fileMap.set(filePath, (fileMap.get(filePath) || 0) + 1);
+            entry.fileMap.set(filePath, (entry.fileMap.get(filePath) || 0) + 1);
+          }
         }
       }
     }
+
+    const contributors: ContributorStat[] = Array.from(authorMap.entries())
+      .map(([author, s]) => ({
+        author,
+        email: s.email,
+        commits: s.commits,
+        additions: s.additions,
+        deletions: s.deletions,
+        totalChanged: s.additions + s.deletions,
+        weekdayDistribution: s.weekdays,
+        topFiles: Array.from(s.fileMap.entries())
+          .map(([p, changes]) => ({ path: p, changes }))
+          .sort((a, b) => b.changes - a.changes)
+          .slice(0, 8)
+      }))
+      .sort((a, b) => b.totalChanged - a.totalChanged);
+
+    const totalCommits = contributors.reduce((s, c) => s + c.commits, 0);
+    const totalAdditions = contributors.reduce((s, c) => s + c.additions, 0);
+    const totalDeletions = contributors.reduce((s, c) => s + c.deletions, 0);
+
+    const dailyActivity: DailyActivity[] = [];
+    const startD = new Date(effectiveSince + 'T00:00:00Z');
+    const endD = new Date(effectiveUntil + 'T00:00:00Z');
+    for (let d = new Date(startD); d <= endD; d.setUTCDate(d.getUTCDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      dailyActivity.push({ date: dateStr, count: dailyMap.get(dateStr) || 0 });
+    }
+
+    const topFiles: FileStat[] = Array.from(fileMap.entries())
+      .map(([p, changes]) => ({ path: p, changes }))
+      .sort((a, b) => b.changes - a.changes)
+      .slice(0, 10);
+
+    return {
+      totalCommits,
+      totalAdditions,
+      totalDeletions,
+      totalChanged: totalAdditions + totalDeletions,
+      contributors,
+      dailyActivity,
+      topFiles,
+      sinceDate: effectiveSince,
+      untilDate: effectiveUntil
+    };
+  } catch (e: any) {
+    console.error('Error parsing getCodeStats output:', e);
+    throw e;
   }
-
-  const contributors: ContributorStat[] = Array.from(authorMap.entries())
-    .map(([author, s]) => ({
-      author,
-      email: s.email,
-      commits: s.commits,
-      additions: s.additions,
-      deletions: s.deletions,
-      totalChanged: s.additions + s.deletions,
-      weekdayDistribution: s.weekdays,
-      topFiles: Array.from(s.fileMap.entries())
-        .map(([p, changes]) => ({ path: p, changes }))
-        .sort((a, b) => b.changes - a.changes)
-        .slice(0, 8)
-    }))
-    .sort((a, b) => b.totalChanged - a.totalChanged);
-
-  const totalCommits = contributors.reduce((s, c) => s + c.commits, 0);
-  const totalAdditions = contributors.reduce((s, c) => s + c.additions, 0);
-  const totalDeletions = contributors.reduce((s, c) => s + c.deletions, 0);
-
-  const dailyActivity: DailyActivity[] = [];
-  const startD = new Date(effectiveSince + 'T00:00:00');
-  const endD = new Date(effectiveUntil + 'T00:00:00');
-  for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
-    const dateStr = d.toISOString().split('T')[0];
-    dailyActivity.push({ date: dateStr, count: dailyMap.get(dateStr) || 0 });
-  }
-
-  const topFiles: FileStat[] = Array.from(fileMap.entries())
-    .map(([p, changes]) => ({ path: p, changes }))
-    .sort((a, b) => b.changes - a.changes)
-    .slice(0, 10);
-
-  return {
-    totalCommits,
-    totalAdditions,
-    totalDeletions,
-    totalChanged: totalAdditions + totalDeletions,
-    contributors,
-    dailyActivity,
-    topFiles,
-    sinceDate: effectiveSince,
-    untilDate: effectiveUntil
-  };
 }

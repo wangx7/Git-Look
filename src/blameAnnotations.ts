@@ -18,6 +18,8 @@ export class BlameAnnotationsManager implements vscode.Disposable {
   private decorationType: vscode.TextEditorDecorationType;
   private disposables: vscode.Disposable[] = [];
   private getCwd: () => string | undefined;
+  private _updateGeneration = 0;
+  private _abortController?: AbortController;
 
   constructor(getCwd: () => string | undefined) {
     this.getCwd = getCwd;
@@ -67,6 +69,10 @@ export class BlameAnnotationsManager implements vscode.Disposable {
   public async toggle(editor: vscode.TextEditor | undefined) {
     if (this.enabled) {
       this.enabled = false;
+      if (this._abortController) {
+        this._abortController.abort();
+        this._abortController = undefined;
+      }
       // Clear decorations in all visible editors
       for (const visibleEditor of vscode.window.visibleTextEditors) {
         visibleEditor.setDecorations(this.decorationType, []);
@@ -99,12 +105,19 @@ export class BlameAnnotationsManager implements vscode.Disposable {
     }
 
     const filePath = document.uri.fsPath;
+    const generation = ++this._updateGeneration;
+
+    if (this._abortController) {
+      this._abortController.abort();
+    }
+    this._abortController = new AbortController();
+    const signal = this._abortController.signal;
 
     try {
       // Resolve Git Root
       let gitRoot = cwd;
       try {
-        gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+        gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd, signal)).trim();
       } catch (e) {
         // Ignore
       }
@@ -113,7 +126,10 @@ export class BlameAnnotationsManager implements vscode.Disposable {
       const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
 
       // Run git blame with porcelain output
-      const output = await execGit(['blame', '--porcelain', repoFilePath], gitRoot);
+      const output = await execGit(['blame', '--porcelain', repoFilePath], gitRoot, signal);
+      if (generation !== this._updateGeneration || signal.aborted) {
+        return; // Outdated request — a newer updateAnnotations call is in flight
+      }
       if (!this.enabled || vscode.window.activeTextEditor !== editor) {
         return; // User toggled off or switched editor during async git call
       }
@@ -220,6 +236,9 @@ export class BlameAnnotationsManager implements vscode.Disposable {
       editor.setDecorations(this.decorationType, decorations);
 
     } catch (err: any) {
+      if (err.message === 'ABORTED' || (signal && signal.aborted)) {
+        return;
+      }
       console.error('[Git 可视化] Blame annotations update failed:', err);
       editor.setDecorations(this.decorationType, []);
     }
@@ -227,6 +246,10 @@ export class BlameAnnotationsManager implements vscode.Disposable {
 
   public dispose() {
     this.enabled = false;
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = undefined;
+    }
     for (const visibleEditor of vscode.window.visibleTextEditors) {
       try {
         visibleEditor.setDecorations(this.decorationType, []);

@@ -1581,6 +1581,61 @@ svg#graph-svg circle.hovered {
   white-space: nowrap;
 }
 
+/* ── Custom Tooltip ──────────────────────────── */
+.custom-tooltip-container {
+  position: relative;
+}
+
+.custom-tooltip {
+  visibility: hidden;
+  background-color: var(--vscode-editorHoverWidget-background, #252526);
+  color: var(--vscode-editorHoverWidget-foreground, #cccccc);
+  border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+  text-align: center;
+  border-radius: 4px;
+  padding: 4px 8px;
+  position: absolute;
+  z-index: 100;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 6px;
+  opacity: 0;
+  transition: opacity 0.2s, visibility 0.2s;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.custom-tooltip-container:hover .custom-tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
+.custom-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -4px;
+  border-width: 4px;
+  border-style: solid;
+  border-color: var(--vscode-editorHoverWidget-background, #252526) transparent transparent transparent;
+}
+
+.custom-tooltip::before {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: var(--vscode-editorHoverWidget-border, #454545) transparent transparent transparent;
+  z-index: -1;
+}
+
 /* ── Author actions ────────────────────────────── */
 .author-actions {
   padding: 8px 14px 14px;
