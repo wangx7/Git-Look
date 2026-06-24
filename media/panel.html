@@ -41,6 +41,7 @@
               <option value="">时间</option>
               <option value="24h">过去24小时</option>
               <option value="7d">过去7天</option>
+              <option value="30d">过去30天</option>
               <option value="custom">自定义...</option>
             </select>
           </div>
@@ -62,30 +63,7 @@
           </button>
         </div>
 
-        <!-- Stats Strip -->
-        <div id="stats-strip" class="stats-strip hidden">
-          <div class="stats-strip-content">
-            <span class="stats-strip-item" id="strip-commits">
-              <i class="codicon codicon-git-commit"></i>
-              <span id="strip-commits-val">—</span> 次提交
-            </span>
-            <span class="stats-strip-sep">·</span>
-            <span class="stats-strip-item">
-              <span class="stats-strip-add" id="strip-add">—</span>
-              <span class="stats-strip-del" id="strip-del">—</span>
-            </span>
-            <span class="stats-strip-sep">·</span>
-            <span class="stats-strip-item" id="strip-contributors">
-              <i class="codicon codicon-people"></i>
-              <span id="strip-contributors-val">—</span> 人
-            </span>
-            <span class="stats-strip-sep">·</span>
-            <span class="stats-strip-range" id="strip-range">近100天</span>
-          </div>
-          <button id="stats-toggle-btn" class="stats-toggle-btn" title="在右侧查看详细统计">
-            <i class="codicon codicon-graph"></i>
-          </button>
-        </div>
+
 
         <!-- 错误提示 -->
         <div id="error-message" class="error-banner hidden"></div>
@@ -111,8 +89,8 @@
 
       <!-- Right Pane: Three States -->
       <div class="details-pane" id="details-pane">
-        <!-- Close button (narrow overlay mode only) -->
-        <button class="overlay-close-btn" id="overlay-close-btn" title="关闭">
+        <!-- Close button -->
+        <button class="details-close-btn" id="details-close-btn" title="折叠详情面板">
           <i class="codicon codicon-close"></i>
         </button>
 
@@ -202,9 +180,7 @@
         <!-- ── State 2: Author Detail ── -->
         <div id="author-stats" class="author-stats hidden">
           <div class="author-stats-header">
-            <button class="back-btn" id="author-back-btn">
-              <i class="codicon codicon-arrow-left"></i> 返回概览
-            </button>
+            <span class="selection-history-title"><i class="codicon codicon-person"></i> 作者详情</span>
           </div>
           <div class="author-profile">
             <span class="avatar-circle author-stats-avatar" id="author-stats-avatar"></span>
@@ -247,6 +223,27 @@
             <button class="author-highlight-btn" id="author-highlight-btn">
               <i class="codicon codicon-eye"></i> 在图谱中高亮此作者
             </button>
+          </div>
+        </div>
+
+        <!-- ── State 3: Selection History ── -->
+        <div id="selection-history" class="selection-history hidden">
+          <div class="selection-history-header">
+            <span class="selection-history-title"><i class="codicon codicon-history"></i> 选区历史</span>
+          </div>
+          <div class="selection-file-info" id="history-file-info"></div>
+          <div class="history-list" id="history-list"></div>
+        </div>
+
+        <div id="file-blame-stats" class="file-blame-stats hidden">
+          <div class="file-blame-header">
+            <span class="file-blame-title"><i class="codicon codicon-pie-chart"></i> 文件行作者</span>
+          </div>
+          <div class="selection-file-info" id="file-blame-info"></div>
+          
+          <div class="rose-chart-container">
+            <svg id="rose-chart-svg" class="rose-chart-svg" viewBox="-100 -100 200 200"></svg>
+            <div id="rose-chart-tooltip" class="rose-chart-tooltip hidden"></div>
           </div>
         </div>
 

@@ -48,7 +48,7 @@
   --radius-sm: 4px;
   --radius-md: 7px;
   --radius-lg: 10px;
-  --row-height: 32px;
+  --row-height: 22px;
   --transition-fast: 0.14s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-md:   0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -224,6 +224,13 @@ body {
   position: relative;
 }
 
+.main-layout.details-collapsed .details-pane {
+  display: none !important;
+}
+.main-layout.details-collapsed .resizer-bar {
+  display: none !important;
+}
+
 .left-pane {
   display: flex;
   flex-direction: column;
@@ -285,6 +292,10 @@ svg#graph-svg {
   z-index: 10;
 }
 
+.graph-col {
+  padding: 0 !important;
+}
+
 /* ══════════════════════════════════════════════════
    COMMITS TABLE
    ══════════════════════════════════════════════════ */
@@ -305,12 +316,6 @@ table#commits-table td {
   border-bottom: none;
   white-space: nowrap;
   font-size: 12px;
-}
-
-.graph-col {
-  width: 120px;
-  min-width: 80px;
-  padding: 0 !important;
 }
 
 .content-col {
@@ -407,6 +412,13 @@ tr.commit-row.selected td.content-col {
   align-items: center;
 }
 
+.commit-author-inline {
+  color: var(--fg-muted);
+  font-size: 11px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
 .commit-date {
   width: 116px;
   min-width: 116px;
@@ -472,15 +484,16 @@ tr.commit-row.selected td.content-col {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 1px 7px;
-  border-radius: 20px;
-  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 10px;
+  font-size: 9.5px;
   font-weight: 600;
   margin-right: 3px;
   vertical-align: middle;
-  line-height: 17px;
+  line-height: 14px;
   white-space: nowrap;
   letter-spacing: 0.02em;
+  height: 16px;
 }
 
 .ref-badge .codicon { font-size: 10px; }
@@ -619,6 +632,7 @@ tr.commit-row.selected td.content-col {
   gap: 10px;
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 12px;
+  padding-right: 32px;
   flex-shrink: 0;
 }
 
@@ -956,7 +970,7 @@ tr.commit-row.selected td.content-col {
 }
 
 /* ══════════════════════════════════════════════════
-   SVG GRAPH — HOVER / LANE HIGHLIGHTING
+   SVG GRAPH — HOVER INTERACTIONS
    ══════════════════════════════════════════════════ */
 svg#graph-svg { pointer-events: none; }
 svg#graph-svg path { pointer-events: stroke; }
@@ -964,49 +978,48 @@ svg#graph-svg circle { pointer-events: fill; }
 
 svg#graph-svg.hover-active path,
 svg#graph-svg.hover-active circle {
-  transition: opacity 0.10s ease, r 0.15s cubic-bezier(0.4,0,0.2,1);
+  transition: r 0.4s cubic-bezier(0.34, 1.8, 0.64, 1), stroke-width 0.4s ease;
 }
 
-svg#graph-svg.hover-active path,
-svg#graph-svg.hover-active circle {
-  opacity: 0.18;
-}
-
-/* Lane highlight rules (lanes 0–23) */
-svg#graph-svg.hover-lane-0  path.lane-0,  svg#graph-svg.hover-lane-0  circle.lane-0,
-svg#graph-svg.hover-lane-1  path.lane-1,  svg#graph-svg.hover-lane-1  circle.lane-1,
-svg#graph-svg.hover-lane-2  path.lane-2,  svg#graph-svg.hover-lane-2  circle.lane-2,
-svg#graph-svg.hover-lane-3  path.lane-3,  svg#graph-svg.hover-lane-3  circle.lane-3,
-svg#graph-svg.hover-lane-4  path.lane-4,  svg#graph-svg.hover-lane-4  circle.lane-4,
-svg#graph-svg.hover-lane-5  path.lane-5,  svg#graph-svg.hover-lane-5  circle.lane-5,
-svg#graph-svg.hover-lane-6  path.lane-6,  svg#graph-svg.hover-lane-6  circle.lane-6,
-svg#graph-svg.hover-lane-7  path.lane-7,  svg#graph-svg.hover-lane-7  circle.lane-7,
-svg#graph-svg.hover-lane-8  path.lane-8,  svg#graph-svg.hover-lane-8  circle.lane-8,
-svg#graph-svg.hover-lane-9  path.lane-9,  svg#graph-svg.hover-lane-9  circle.lane-9,
-svg#graph-svg.hover-lane-10 path.lane-10, svg#graph-svg.hover-lane-10 circle.lane-10,
-svg#graph-svg.hover-lane-11 path.lane-11, svg#graph-svg.hover-lane-11 circle.lane-11,
-svg#graph-svg.hover-lane-12 path.lane-12, svg#graph-svg.hover-lane-12 circle.lane-12,
-svg#graph-svg.hover-lane-13 path.lane-13, svg#graph-svg.hover-lane-13 circle.lane-13,
-svg#graph-svg.hover-lane-14 path.lane-14, svg#graph-svg.hover-lane-14 circle.lane-14,
-svg#graph-svg.hover-lane-15 path.lane-15, svg#graph-svg.hover-lane-15 circle.lane-15,
-svg#graph-svg.hover-lane-16 path.lane-16, svg#graph-svg.hover-lane-16 circle.lane-16,
-svg#graph-svg.hover-lane-17 path.lane-17, svg#graph-svg.hover-lane-17 circle.lane-17,
-svg#graph-svg.hover-lane-18 path.lane-18, svg#graph-svg.hover-lane-18 circle.lane-18,
-svg#graph-svg.hover-lane-19 path.lane-19, svg#graph-svg.hover-lane-19 circle.lane-19,
-svg#graph-svg.hover-lane-20 path.lane-20, svg#graph-svg.hover-lane-20 circle.lane-20,
-svg#graph-svg.hover-lane-21 path.lane-21, svg#graph-svg.hover-lane-21 circle.lane-21,
-svg#graph-svg.hover-lane-22 path.lane-22, svg#graph-svg.hover-lane-22 circle.lane-22,
-svg#graph-svg.hover-lane-23 path.lane-23, svg#graph-svg.hover-lane-23 circle.lane-23 {
+/* Keep the hovered lane fully opaque */
+svg#graph-svg.hover-active path.hovered-lane-path,
+svg#graph-svg.hover-active circle.hovered-lane-node,
+svg#graph-svg.hover-active g.hovered-lane-node circle {
   opacity: 1 !important;
 }
 
+svg#graph-svg.hover-active path.hovered-lane-path {
+  stroke-width: 3.0px !important;
+}
+
+/* ── Node base transitions ── */
 svg#graph-svg circle {
-  transition: r 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: r 0.4s cubic-bezier(0.34, 1.8, 0.64, 1),
+              stroke-width 0.4s cubic-bezier(0.34, 1.8, 0.64, 1);
 }
 
 svg#graph-svg circle.hovered {
+  r: 5.5px !important;
+  stroke-width: 1px !important;
+}
+
+/* ── Merge node hover ──────────────────────────── */
+svg#graph-svg .merge-outer {
+  transition: r 0.4s cubic-bezier(0.34, 1.8, 0.64, 1),
+              stroke-width 0.4s cubic-bezier(0.34, 1.8, 0.64, 1);
+}
+
+svg#graph-svg .merge-outer.hovered {
   r: 6.5px !important;
-  stroke-width: 2.5px !important;
+  stroke-width: 1px !important;
+}
+
+svg#graph-svg .merge-inner {
+  transition: r 0.4s cubic-bezier(0.34, 1.8, 0.64, 1);
+}
+
+svg#graph-svg .merge-inner.hovered {
+  r: 3px !important;
 }
 
 /* ══════════════════════════════════════════════════
@@ -1180,7 +1193,7 @@ svg#graph-svg circle.hovered {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px 8px;
+  padding: 10px 32px 8px 14px;
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
@@ -1780,109 +1793,78 @@ svg#graph-svg circle.hovered {
 }
 
 /* ══════════════════════════════════════════════════
-   RESPONSIVE: OVERLAY MODE (整体宽度 < 550px)
-   details-pane 变为绝对定位覆盖层，右侧滑入显示
+   RESPONSIVE: VERTICAL STACKING MODE (整体宽度 < 550px)
+   details-pane 变为上下排版，中间 resizer 变为水平横杆
    由 JS 在 .main-layout 上切换 .layout-narrow class
    ══════════════════════════════════════════════════ */
 
-/* 窄屏模式：details-pane 脱离文档流，绝对定位在右侧 */
-.main-layout.layout-narrow .details-pane {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: min(340px, 92vw) !important;
-  min-width: unset !important;
-  max-width: unset !important;
-  transform: translateX(100%);
-  box-shadow: none;
-  z-index: 50;
+.main-layout.layout-narrow {
+  flex-direction: column !important;
 }
 
-/* 窄屏：resizer 隐藏 */
-.main-layout.layout-narrow .resizer-bar {
-  display: none;
-}
-
-/* 窄屏：left-pane 占满全宽 */
+/* 窄屏：left-pane 占上半部分 */
 .main-layout.layout-narrow .left-pane {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
+  width: 100% !important;
+  height: 55% !important;
+  flex: none !important;
 }
 
-/* 窄屏 details-pane 打开状态 */
-.main-layout.layout-narrow .details-pane.overlay-open {
-  transform: translateX(0);
-  box-shadow: -6px 0 32px rgba(0, 0, 0, 0.45);
+/* 窄屏：resizer 变为行调整器 */
+.main-layout.layout-narrow .resizer-bar {
+  display: block !important;
+  width: 100% !important;
+  height: 4px !important;
+  min-height: 4px !important;
+  cursor: row-resize !important;
+  border-left: none !important;
+  border-top: 1px solid var(--border-color) !important;
+  background-color: var(--surface-2);
 }
 
-/* 遮罩背景 */
+.main-layout.layout-narrow .resizer-bar:hover,
+.main-layout.layout-narrow .resizer-bar.dragging {
+  background-color: var(--accent);
+  border-top-color: var(--accent);
+}
+
+/* 窄屏：details-pane 占下半部分 */
+.main-layout.layout-narrow .details-pane {
+  position: relative !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: unset !important;
+  height: calc(45% - 4px) !important;
+  transform: none !important;
+  box-shadow: none !important;
+  border-left: none !important;
+  border-top: 1px solid var(--border-color);
+}
+
 .overlay-backdrop {
-  display: none;
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.40);
-  z-index: 45;
-  backdrop-filter: blur(1px);
-  -webkit-backdrop-filter: blur(1px);
-  cursor: pointer;
-  animation: backdropFadeIn 0.18s ease;
+  display: none !important;
 }
 
-.main-layout.layout-narrow .overlay-backdrop.visible {
-  display: block;
-}
-
-@keyframes backdropFadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-/* 窄屏：右侧面板关闭按钮 */
-.overlay-close-btn {
-  display: none;
+.details-close-btn {
   position: absolute;
   top: 8px;
   right: 8px;
   width: 24px;
   height: 24px;
-  border-radius: 50%;
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-2);
+  border: none;
+  background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
+  display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 55;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-  font-size: 14px;
-  line-height: 1;
+  border-radius: var(--radius-sm);
+  z-index: 150;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
 }
 
-.main-layout.layout-narrow .overlay-close-btn {
-  display: inline-flex;
-}
-
-.overlay-close-btn:hover {
-  background: var(--row-hover-bg);
+.details-close-btn:hover {
+  background-color: var(--row-hover-bg);
   color: var(--fg-color);
-}
-
-/* 窄屏：stats-strip 显示统计图按钮更显眼 */
-.main-layout.layout-narrow .stats-toggle-btn {
-  background-color: var(--accent-dim);
-  border-color: var(--accent);
-  color: #fff;
-  padding: 0 8px;
-  height: 20px;
-  gap: 4px;
-  font-size: 10.5px;
-}
-
-.main-layout.layout-narrow .stats-toggle-btn::after {
-  content: '统计';
-  font-size: 10px;
 }
 
 /* ── filter-bar 换行 (整体 < 400px) ──────────────── */
@@ -1918,7 +1900,248 @@ svg#graph-svg circle.hovered {
   max-width: 90px;
 }
 
-/* 窄屏：filter-group 图标隐藏，节省横向空间 */
 .main-layout.layout-narrow .filter-bar .filter-group label {
   display: none;
+}
+
+/* ── Selection History Panel [NEW] ── */
+.selection-history {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  animation: slideInFromRight 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.selection-history-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.selection-history-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.selection-file-info {
+  padding: 6px 12px;
+  background-color: rgba(128,128,128,0.06);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  word-break: break-all;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* History Card Item */
+.history-card {
+  background-color: rgba(128, 128, 128, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-card:hover {
+  background-color: var(--row-hover-bg);
+  border-color: var(--accent);
+}
+
+.history-card.active {
+  background-color: var(--row-selected-bg);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.history-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-card-author {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--fg-color);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-card-date {
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+
+.history-card-msg {
+  font-size: 11.5px;
+  color: var(--fg-color);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.history-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  margin-top: 1px;
+}
+
+.history-card-hash {
+  color: var(--accent);
+}
+
+/* ══════════════════════════════════════════════════
+   SVG GRAPH — PATH BASE STYLES
+   ══════════════════════════════════════════════════ */
+#graph-svg path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke-width 0.4s cubic-bezier(0.34, 1.8, 0.64, 1);
+}
+
+/* ══════════════════════════════════════════════════
+   STATE 4: FILE BLAME STATS
+   ══════════════════════════════════════════════════ */
+.file-blame-stats {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.file-blame-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.file-blame-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rose-chart-container {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background-color: rgba(128, 128, 128, 0.02);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.rose-chart-svg {
+  width: 90%;
+  height: 90%;
+  overflow: visible;
+}
+
+.rose-chart-svg path {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), fill 0.2s, opacity 0.2s, stroke 0.2s, stroke-width 0.2s;
+  transform-origin: 0 0;
+}
+
+.rose-chart-svg path:hover {
+  cursor: pointer;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.15));
+}
+
+.rose-chart-tooltip {
+  position: absolute;
+  background-color: var(--surface-2, var(--vscode-editorHoverWidget-background));
+  border: 1px solid var(--vscode-editorHoverWidget-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--vscode-editorHoverWidget-foreground);
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  transition: opacity 0.2s ease, transform 0.1s ease-out;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  min-width: 180px;
+  transform: translate(-50%, -100%);
+  margin-top: -8px;
+}
+
+.file-blame-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.blame-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: rgba(128, 128, 128, 0.04);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.blame-list-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.blame-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.blame-list-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--fg-faint);
+}
+
+.blame-list-pct {
+  font-weight: 600;
+  color: var(--fg-color);
+  min-width: 36px;
+  text-align: right;
 }

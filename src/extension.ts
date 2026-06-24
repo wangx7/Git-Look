@@ -88,7 +88,6 @@ export function activate(context: vscode.ExtensionContext) {
         cancellable: false
       }, async () => {
         const commits = await traceLineHistory(cwd, filePath, startLine, endLine, startRef);
-        // Check for local changes (uncommitted changes in the working tree) within the selected line range
         const hasLocalChanges = !startRef && (await hasLocalModifications(cwd, filePath, startLine, endLine));
 
         if (commits.length === 0 && !hasLocalChanges) {
@@ -96,105 +95,44 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        const fileName = path.basename(filePath);
-
-        // The Git empty-tree hash — used as "parent" for root commits that have no parent
-        const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
-
-        const resourceList: any[] = [];
-
-        // Compute repoRoot once before the loop to avoid redundant git calls
         let repoRoot = cwd;
         try {
           repoRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
         } catch (e) { }
         const repoFilePath = path.relative(repoRoot, filePath).replace(/\\/g, '/');
 
-        for (const commit of commits) {
-          // Safely resolve the parent ref — parentHash may be the literal string 'empty'
-          // when traceLineHistory encounters a root commit (no actual parent).
-          let parentRef = (!commit.parentHash || commit.parentHash === 'empty')
-            ? EMPTY_TREE
-            : commit.parentHash;
+        const commitsToSend = commits.map(c => ({
+          hash: c.hash,
+          parentHash: c.parentHash,
+          author: c.author,
+          timestamp: c.timestamp,
+          message: c.message,
+          lineRange: c.lineRange
+        }));
 
-          // If the parent is not empty, check if the file actually existed in that parent commit.
-          // If the file did not exist (e.g. it was newly created in this commit),
-          // we must diff it against the EMPTY_TREE so VS Code can render the diff properly.
-          if (parentRef !== EMPTY_TREE) {
-            try {
-              await execGit(['cat-file', '-e', `${parentRef}:${repoFilePath}`], repoRoot);
-            } catch (e) {
-              parentRef = EMPTY_TREE;
-            }
-          }
-
-          // File as it existed in the parent commit (older state → LEFT side)
-          // Use the actual file path so VS Code's git content provider can resolve the content.
-          const originalUri = vscode.Uri.from({
-            scheme: 'git',
-            path: filePath,
-            query: JSON.stringify({ path: filePath, ref: parentRef })
-          });
-
-          // Construct a label URI with commit info for the multi-diff tab title display
-          const parentHashDisplay = parentRef === EMPTY_TREE ? 'Empty Tree' : parentRef.substring(0, 7);
-          const cleanMessage = commit.message.replace(/[\r\n]+/g, ' ').substring(0, 30);
-          const labelUri = vscode.Uri.from({
-            scheme: 'git-visual',
-            path: `/${fileName}`,
-            query: `[${parentHashDisplay}] → [${commit.hash.substring(0, 7)}] ${cleanMessage}`
-          });
-
-          // File as it became in this commit (newer state → RIGHT side)
-          // Use the actual file path so VS Code's git content provider can resolve the content.
-          const modifiedUri = vscode.Uri.from({
-            scheme: 'git',
-            path: filePath,
-            query: JSON.stringify({ path: filePath, ref: commit.hash })
-          });
-          // vscode.changes tuple: [labelUri, originalUri, modifiedUri]
-          resourceList.push([labelUri, originalUri, modifiedUri]);
-        }
-
-        // Prepend working-tree (uncommitted) changes as the very first — i.e. newest — entry.
         if (hasLocalChanges) {
           const latestRef = commits[0]?.hash ?? 'HEAD';
-          const headUri = vscode.Uri.from({
-            scheme: 'git',
-            path: filePath,
-            query: JSON.stringify({ path: filePath, ref: latestRef })
+          commitsToSend.unshift({
+            hash: 'HEAD',
+            parentHash: latestRef,
+            author: '工作区未提交更改',
+            timestamp: Math.floor(Date.now() / 1000),
+            message: '未提交的修改',
+            lineRange: {
+              oldStart: startLine,
+              oldLength: endLine - startLine + 1,
+              newStart: startLine,
+              newLength: endLine - startLine + 1
+            }
           });
-          const workingTreeUri = vscode.Uri.file(filePath);
-
-          const labelUri = vscode.Uri.from({
-            scheme: 'git-visual',
-            path: `/${fileName}`,
-            query: `[${latestRef.substring(0, 7)}] → 工作区未提交更改`
-          });
-
-          // For local working tree changes, we pass the actual file URI so it remains editable.
-          resourceList.unshift([labelUri, headUri, workingTreeUri]);
         }
 
-        const title = `Git 选区历史: ${fileName} (L${startLine}–L${endLine})`;
-        await vscode.commands.executeCommand('vscode.changes', title, resourceList);
-
-        // After the multi-diff editor opens, reveal the selected line range so the
-        // user lands directly on the relevant change instead of the top of the file.
-        // We retry a few times because the diff editor may take a moment to become active.
-        const targetRange = new vscode.Range(
-          new vscode.Position(Math.max(0, startLine - 2), 0),
-          new vscode.Position(endLine - 1, 0)
-        );
-        let revealed = false;
-        for (let attempt = 0; attempt < 6 && !revealed; attempt++) {
-          await new Promise(r => setTimeout(r, 200 + attempt * 150));
-          const activeEditor = vscode.window.activeTextEditor;
-          if (activeEditor) {
-            activeEditor.revealRange(targetRange, vscode.TextEditorRevealType.InCenter);
-            revealed = true;
-          }
-        }
+        gitGraphProvider.showSelectionHistory({
+          filePath: repoFilePath,
+          startLine,
+          endLine,
+          commits: commitsToSend
+        });
       });
     } catch (err: any) {
       vscode.window.showErrorMessage(`获取选区历史失败: ${err.message}`);
@@ -204,7 +142,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(traceCommand);
 
   // 3.5 Register Toggle Blame Annotations command (Git 行作者)
-  const blameAnnotationsManager = new BlameAnnotationsManager(getCwd);
+  const blameAnnotationsManager = new BlameAnnotationsManager(getCwd, gitGraphProvider);
+  gitGraphProvider.setBlameManager(blameAnnotationsManager);
   context.subscriptions.push(blameAnnotationsManager);
 
   const toggleBlameCommand = vscode.commands.registerCommand('git-visual.toggleLineBlame', async () => {

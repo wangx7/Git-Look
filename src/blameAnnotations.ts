@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { execGit } from './gitHelper';
+import { GitGraphProvider } from './panel/gitGraphProvider';
 
 function formatBlameLabel(dateStr: string, name: string): string {
   const maxNameLen = 8;
@@ -18,11 +19,15 @@ export class BlameAnnotationsManager implements vscode.Disposable {
   private decorationType: vscode.TextEditorDecorationType;
   private disposables: vscode.Disposable[] = [];
   private getCwd: () => string | undefined;
+  private gitGraphProvider: GitGraphProvider;
   private _updateGeneration = 0;
   private _abortController?: AbortController;
+  private currentHighlightDeco: vscode.TextEditorDecorationType | null = null;
+  private lineHashMapping: string[] = [];
 
-  constructor(getCwd: () => string | undefined) {
+  constructor(getCwd: () => string | undefined, gitGraphProvider: GitGraphProvider) {
     this.getCwd = getCwd;
+    this.gitGraphProvider = gitGraphProvider;
 
     // Create the decoration type for git blame gutter annotations
     this.decorationType = vscode.window.createTextEditorDecorationType({
@@ -76,7 +81,9 @@ export class BlameAnnotationsManager implements vscode.Disposable {
       // Clear decorations in all visible editors
       for (const visibleEditor of vscode.window.visibleTextEditors) {
         visibleEditor.setDecorations(this.decorationType, []);
+        this.clearHighlight(visibleEditor);
       }
+      this.gitGraphProvider.clearFileBlameStats();
       vscode.window.setStatusBarMessage('Git 行作者注解已关闭', 2000);
     } else {
       this.enabled = true;
@@ -84,6 +91,42 @@ export class BlameAnnotationsManager implements vscode.Disposable {
         await this.updateAnnotations(editor);
       }
       vscode.window.setStatusBarMessage('Git 行作者注解已开启', 2000);
+    }
+  }
+
+  public turnOff() {
+    if (this.enabled) {
+      this.toggle(undefined);
+    }
+  }
+
+  public highlightCommitLines(editor: vscode.TextEditor, hash: string, color: string) {
+    this.clearHighlight(editor);
+    if (!this.enabled || !hash) return;
+    
+    this.currentHighlightDeco = vscode.window.createTextEditorDecorationType({
+      backgroundColor: color,
+      isWholeLine: true
+    });
+    
+    const ranges: vscode.Range[] = [];
+    for (let i = 0; i < this.lineHashMapping.length; i++) {
+      if (this.lineHashMapping[i] === hash) {
+        ranges.push(new vscode.Range(i, 0, i, 0));
+      }
+    }
+    
+    editor.setDecorations(this.currentHighlightDeco, ranges);
+    
+    if (ranges.length > 0) {
+      editor.revealRange(ranges[0], vscode.TextEditorRevealType.InCenter);
+    }
+  }
+
+  public clearHighlight(editor: vscode.TextEditor) {
+    if (this.currentHighlightDeco) {
+      this.currentHighlightDeco.dispose();
+      this.currentHighlightDeco = null;
     }
   }
 
@@ -138,6 +181,8 @@ export class BlameAnnotationsManager implements vscode.Disposable {
       const commitMap = new Map<string, { author: string; email: string; time: number; summary: string }>();
       const decorations: vscode.DecorationOptions[] = [];
       const documentLineCount = document.lineCount;
+      const commitStatsMap = new Map<string, { hash: string; lines: number; author: string; summary: string }>();
+      this.lineHashMapping = new Array(documentLineCount).fill('');
 
       let i = 0;
       while (i < lines.length) {
@@ -205,6 +250,13 @@ export class BlameAnnotationsManager implements vscode.Disposable {
           }
 
           const authorName = hash.startsWith('00000000') ? '未提交' : meta.author;
+          
+          this.lineHashMapping[lineIndex] = hash;
+          if (!commitStatsMap.has(hash)) {
+            commitStatsMap.set(hash, { hash, lines: 0, author: authorName, summary: meta.summary });
+          }
+          commitStatsMap.get(hash)!.lines += 1;
+          
           const formattedLabel = formatBlameLabel(dateStr, authorName);
 
           const hoverMarkdown = new vscode.MarkdownString();
@@ -235,6 +287,10 @@ export class BlameAnnotationsManager implements vscode.Disposable {
 
       editor.setDecorations(this.decorationType, decorations);
 
+      const statsArray = Array.from(commitStatsMap.values())
+        .sort((a, b) => b.lines - a.lines);
+      this.gitGraphProvider.showFileBlameStats(path.basename(filePath), statsArray);
+
     } catch (err: any) {
       if (err.message === 'ABORTED' || (signal && signal.aborted)) {
         return;
@@ -257,6 +313,7 @@ export class BlameAnnotationsManager implements vscode.Disposable {
         // Ignore
       }
     }
+    this.gitGraphProvider.clearFileBlameStats();
     this.decorationType.dispose();
     this.disposables.forEach(d => d.dispose());
     this.disposables = [];

@@ -8,14 +8,39 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _abortController?: AbortController;
   private _statsAbortController?: AbortController;
+  private blameManager?: any;
   private _currentGitDir?: string;
   private _gitWatcher?: fs.FSWatcher;
   private _debounceTimer?: NodeJS.Timeout;
+
+  public showFileBlameStats(fileName: string, stats: { author: string; lines: number }[]) {
+    if (this._view) {
+      this._view.webview.postMessage({
+        type: 'showFileBlameStats',
+        fileName,
+        stats
+      });
+      // Try to show the view but preserve focus in the editor
+      // this._view.show(true); // Requires VS Code 1.67+, but might not be necessary if the panel is already visible
+    }
+  }
+
+  public clearFileBlameStats() {
+    if (this._view) {
+      this._view.webview.postMessage({
+        type: 'clearFileBlameStats'
+      });
+    }
+  }
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
     private readonly _getCwd: () => string | undefined
   ) { }
+
+  public setBlameManager(manager: any) {
+    this.blameManager = manager;
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -252,11 +277,17 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           // Use absolute file path with the built-in git scheme so VSCode can correctly
           // render binary files (images, etc.) via the vscode.git extension.
           const absoluteFilePath = path.join(gitRoot, file);
-          const leftUri = vscode.Uri.from({
-            scheme: 'git',
-            path: absoluteFilePath,
-            query: JSON.stringify({ path: absoluteFilePath, ref: parentHash || 'empty' })
-          });
+          const leftUri = (!parentHash || parentHash === 'empty') ?
+            vscode.Uri.from({
+              scheme: 'git',
+              path: absoluteFilePath,
+              query: JSON.stringify({ path: absoluteFilePath, ref: '~' })
+            }) :
+            vscode.Uri.from({
+              scheme: 'git',
+              path: absoluteFilePath,
+              query: JSON.stringify({ path: absoluteFilePath, ref: parentHash })
+            });
           const rightUri = vscode.Uri.from({
             scheme: 'git',
             path: absoluteFilePath,
@@ -265,6 +296,86 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
 
           await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+          break;
+        }
+        case 'openSingleDiff': {
+          const { file, hash, lineRange } = data;
+          let parentHash = data.parentHash;
+
+          try {
+            const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], gitRoot)).trim();
+            const parents = parentsStr ? parentsStr.split(/\s+/) : [];
+            if (parents.length > 0) {
+              let existsInCurrent = false;
+              try {
+                await execGit(['cat-file', '-e', `${hash}:${file}`], gitRoot);
+                existsInCurrent = true;
+              } catch (e) {}
+
+              if (existsInCurrent) {
+                let existsInPrimaryParent = false;
+                try {
+                  await execGit(['cat-file', '-e', `${parents[0]}:${file}`], gitRoot);
+                  existsInPrimaryParent = true;
+                } catch (e) {}
+
+                if (existsInPrimaryParent) {
+                  parentHash = parents[0];
+                } else {
+                  parentHash = 'empty';
+                }
+              } else {
+                let foundParent = '';
+                for (const parent of parents) {
+                  try {
+                    await execGit(['cat-file', '-e', `${parent}:${file}`], gitRoot);
+                    foundParent = parent;
+                    break;
+                  } catch (e) {}
+                }
+                parentHash = foundParent || 'empty';
+              }
+            }
+          } catch (e) {}
+
+          const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
+          const leftUri = (!parentHash || parentHash === 'empty') ?
+            vscode.Uri.from({
+              scheme: 'git',
+              path: absoluteFilePath,
+              query: JSON.stringify({ path: absoluteFilePath, ref: '~' })
+            }) :
+            vscode.Uri.from({
+              scheme: 'git',
+              path: absoluteFilePath,
+              query: JSON.stringify({ path: absoluteFilePath, ref: parentHash })
+            });
+
+          const rightUri = vscode.Uri.from({
+            scheme: 'git',
+            path: absoluteFilePath,
+            query: JSON.stringify({ path: absoluteFilePath, ref: hash })
+          });
+          const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
+
+          await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+
+          if (lineRange) {
+            const targetLine = lineRange.newStart;
+            const targetRange = new vscode.Range(
+              new vscode.Position(Math.max(0, targetLine - 2), 0),
+              new vscode.Position(targetLine + (lineRange.newLength || 1) - 1, 0)
+            );
+            let revealed = false;
+            for (let attempt = 0; attempt < 6 && !revealed; attempt++) {
+              await new Promise(r => setTimeout(r, 200 + attempt * 150));
+              const activeEditor = vscode.window.activeTextEditor;
+              if (activeEditor) {
+                activeEditor.revealRange(targetRange, vscode.TextEditorRevealType.InCenter);
+                revealed = true;
+              }
+            }
+          }
           break;
         }
         case 'openWorkspaceFile': {
@@ -333,7 +444,24 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
-
+        case 'hoverBlameCommit': {
+          if (vscode.window.activeTextEditor && this.blameManager) {
+            this.blameManager.highlightCommitLines(vscode.window.activeTextEditor, data.hash, data.color);
+          }
+          break;
+        }
+        case 'clearHoverBlameCommit': {
+          if (vscode.window.activeTextEditor && this.blameManager) {
+            this.blameManager.clearHighlight(vscode.window.activeTextEditor);
+          }
+          break;
+        }
+        case 'blameVisibilityChanged': {
+          if (data.state !== 4 && this.blameManager) {
+            this.blameManager.turnOff();
+          }
+          break;
+        }
       }
     });
   }
@@ -367,6 +495,19 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     if (this._view) {
       this._view.show(true); // Bring panel view to focus
       this._view.webview.postMessage({ type: 'focusCommit', hash });
+    }
+  }
+
+  public showSelectionHistory(data: { filePath: string, startLine: number, endLine: number, commits: any[] }) {
+    if (this._view) {
+      this._view.show(true); // Bring panel view to focus
+      this._view.webview.postMessage({
+        type: 'showHistory',
+        filePath: data.filePath,
+        startLine: data.startLine,
+        endLine: data.endLine,
+        commits: data.commits
+      });
     }
   }
 

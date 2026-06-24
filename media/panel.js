@@ -19,6 +19,7 @@
   // Details Pane Elements
   const detailsPane = document.getElementById('details-pane');
   const resizerBar = document.getElementById('resizer-bar');
+  const detailsCloseBtn = document.getElementById('details-close-btn');
   const detailsPlaceholder = document.getElementById('details-placeholder');
   const detailsContent = document.getElementById('details-content');
   const detailHashBadge = document.getElementById('detail-hash-badge');
@@ -30,6 +31,9 @@
   const detailMsgBody = document.getElementById('detail-msg-body');
   const detailStatsRow = document.getElementById('detail-stats-row');
   const detailFilesTree = document.getElementById('detail-files-tree');
+  const leftPaneEl = document.querySelector('.left-pane');
+  const mainLayoutEl = document.querySelector('.main-layout');
+  const selectionHistoryEl = document.getElementById('selection-history');
 
   // Stats Elements
   const statsStrip = document.getElementById('stats-strip');
@@ -48,7 +52,6 @@
   const contributorsList = document.getElementById('contributors-list');
   const topFilesList = document.getElementById('top-files-list');
   const authorStatsPane = document.getElementById('author-stats');
-  const authorBackBtn = document.getElementById('author-back-btn');
   const authorStatsAvatar = document.getElementById('author-stats-avatar');
   const authorStatsName = document.getElementById('author-stats-name');
   const authorStatsEmail = document.getElementById('author-stats-email');
@@ -74,10 +77,37 @@
   let currentFocusedAuthor = null; // author name for author-detail state
   let commitBranchLabel = {};   // hash → {name, color}
   let isOverlayMode = false;    // whether in narrow/overlay layout mode
+  let rightPaneVisible = 1; // 0 for hidden, 1 for visible
+
+  // Helper to map UI state to the state number (0-4)
+  function getRightPaneStateNumber() {
+    if (rightPaneVisible === 0) {
+      return 0; // 0: 隐藏
+    }
+    switch (rightPaneState) {
+      case 'overview':
+        return 1; // 1: 展示统计
+      case 'commit':
+      case 'author':
+        return 2; // 2: 展示详情
+      case 'history':
+        return 3; // 3: 展示选区历史
+      case 'file_blame_stats':
+        return 4; // 4: 展示行作者玫瑰图
+      case 'loading':
+      default:
+        return 1;
+    }
+  }
 
   // Right pane state machine
-  const RightPaneState = { OVERVIEW: 'overview', COMMIT: 'commit', AUTHOR: 'author', LOADING: 'loading' };
+  const RightPaneState = { OVERVIEW: 'overview', COMMIT: 'commit', AUTHOR: 'author', HISTORY: 'history', FILE_BLAME_STATS: 'file_blame_stats', LOADING: 'loading' };
   let rightPaneState = RightPaneState.LOADING;
+
+  function checkBlameState() {
+    const stateNum = getRightPaneStateNumber();
+    vscode.postMessage({ command: 'blameVisibilityChanged', state: stateNum });
+  }
 
   function setRightPane(state) {
     rightPaneState = state;
@@ -85,6 +115,13 @@
     detailsContent.classList.add('hidden');
     authorStatsPane.classList.add('hidden');
     detailsPlaceholder.classList.add('hidden');
+    if (selectionHistoryEl) {
+      selectionHistoryEl.classList.add('hidden');
+    }
+    const fileBlameStatsEl = document.getElementById('file-blame-stats');
+    if (fileBlameStatsEl) {
+      fileBlameStatsEl.classList.add('hidden');
+    }
 
     if (state === RightPaneState.LOADING) {
       detailsPlaceholder.classList.remove('hidden');
@@ -94,12 +131,69 @@
       detailsContent.classList.remove('hidden');
     } else if (state === RightPaneState.AUTHOR) {
       authorStatsPane.classList.remove('hidden');
+    } else if (state === RightPaneState.HISTORY) {
+      if (selectionHistoryEl) {
+        selectionHistoryEl.classList.remove('hidden');
+      }
+    } else if (state === RightPaneState.FILE_BLAME_STATS) {
+      if (fileBlameStatsEl) {
+        fileBlameStatsEl.classList.remove('hidden');
+      }
     }
+    
+    // Auto-expand when a view is activated (except for loading)
+    if (state !== RightPaneState.LOADING) {
+      setRightPaneVisible(1);
+    } else {
+      checkBlameState();
+    }
+  }
 
-    // In overlay (narrow) mode, automatically reveal the details panel
-    if (isOverlayMode && state !== RightPaneState.LOADING) {
-      openOverlay();
+  function updateDetailsCollapseUI() {
+    if (mainLayoutEl) {
+      mainLayoutEl.classList.toggle('details-collapsed', rightPaneVisible === 0);
+      if (rightPaneVisible !== 0) {
+        drawSvg();
+        if (currentStatsData && currentStatsData.dailyActivity && typeof renderActivityChart === 'function') {
+          renderActivityChart(currentStatsData.dailyActivity);
+        }
+      }
     }
+    checkBlameState();
+  }
+
+  function setRightPaneVisible(visible) {
+    rightPaneVisible = visible;
+    updateDetailsCollapseUI();
+  }
+
+  function setRightPaneStateByNumber(num) {
+    if (num === 0) {
+      setRightPaneVisible(0);
+    } else {
+      setRightPaneVisible(1);
+      if (num === 1) {
+        setRightPane(RightPaneState.OVERVIEW);
+      } else if (num === 2) {
+        if (selectedCommitHash) {
+          setRightPane(RightPaneState.COMMIT);
+        } else if (currentFocusedAuthor) {
+          setRightPane(RightPaneState.AUTHOR);
+        } else {
+          setRightPane(RightPaneState.OVERVIEW);
+        }
+      } else if (num === 3) {
+        setRightPane(RightPaneState.HISTORY);
+      } else if (num === 4) {
+        setRightPane(RightPaneState.FILE_BLAME_STATS);
+      }
+    }
+    saveCurrentState();
+  }
+
+  function ensureDetailsExpanded() {
+    setRightPaneVisible(1);
+    saveCurrentState();
   }
 
   // Pagination State
@@ -127,7 +221,9 @@
       hasMoreCommits,
       filters,
       detailsWidth: detailsPane.style.width,
-      rightPaneState
+      rightPaneState,
+      rightPaneVisible,
+      detailsCollapsed: rightPaneVisible === 0
     });
   }
 
@@ -144,9 +240,9 @@
   }
 
   // Settings
-  const rowHeight = 32;
-  const laneWidth = 12;
-  const paddingLeft = 16;
+  const rowHeight = 22;
+  const laneWidth = 14;
+  const paddingLeft = 12;
   const colors = [
     '#3b82f6', // modern blue
     '#10b981', // emerald green
@@ -242,6 +338,10 @@
       const d = new Date();
       d.setDate(d.getDate() - 7);
       sinceVal = d.toISOString().split('T')[0];
+    } else if (preset === '30d') {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      sinceVal = d.toISOString().split('T')[0];
     } else if (preset === 'custom') {
       sinceVal = sinceDate.value || undefined;
       untilVal = untilDate.value || undefined;
@@ -256,12 +356,13 @@
     };
   }
 
-  function reloadData() {
+  function reloadData(forceExpandOverview = false) {
     currentPage = 0;
     hasMoreCommits = true;
     commits = [];
     selectedCommitHash = null;
     currentFocusedAuthor = null;
+    window._pendingForceExpand = forceExpandOverview;
     setRightPane(RightPaneState.LOADING);
     isFetching = true;
     showLoading();
@@ -303,6 +404,15 @@
     currentPage = previousState.currentPage || 0;
     hasMoreCommits = previousState.hasMoreCommits !== undefined ? previousState.hasMoreCommits : true;
     
+    if (previousState.rightPaneVisible !== undefined) {
+      rightPaneVisible = previousState.rightPaneVisible;
+    } else if (previousState.detailsCollapsed !== undefined) {
+      rightPaneVisible = previousState.detailsCollapsed ? 0 : 1;
+    } else {
+      rightPaneVisible = 1;
+    }
+    updateDetailsCollapseUI();
+
     if (previousState.detailsWidth) {
       detailsPane.style.width = previousState.detailsWidth;
     }
@@ -337,23 +447,26 @@
         setRightPane(RightPaneState.COMMIT);
       }
     } else {
+      rightPaneVisible = 1;
+      updateDetailsCollapseUI();
       setRightPane(RightPaneState.LOADING);
+      window._pendingForceExpand = true;
     }
     vscode.postMessage({ command: 'initWatcher' });
     requestStats(getFilters());
   } else {
     // 初始加载
-    reloadData();
+    reloadData(true);
   }
 
   // 过滤器监听
   branchSelect.addEventListener('change', () => {
     adjustSelectWidth(branchSelect);
-    reloadData();
+    reloadData(true);
   });
   authorSelect.addEventListener('change', () => {
     adjustSelectWidth(authorSelect);
-    reloadData();
+    reloadData(true);
   });
   datePresetSelect.addEventListener('change', () => {
     adjustSelectWidth(datePresetSelect);
@@ -364,10 +477,10 @@
       sinceDate.value = '';
       untilDate.value = '';
     }
-    reloadData();
+    reloadData(true);
   });
-  sinceDate.addEventListener('change', reloadData);
-  untilDate.addEventListener('change', reloadData);
+  sinceDate.addEventListener('change', () => reloadData(true));
+  untilDate.addEventListener('change', () => reloadData(true));
 
   let searchTimeout;
   searchInput.addEventListener('input', () => {
@@ -375,7 +488,7 @@
     searchInput.style.opacity = '0.55'; // 防抖等待期间给出视觉反馈
     searchTimeout = setTimeout(() => {
       searchInput.style.opacity = '';
-      reloadData();
+      reloadData(true);
     }, 350);
   });
 
@@ -388,7 +501,7 @@
     dateRangeGroup.classList.add('hidden');
     searchInput.value = '';
     updateSelectWidths();
-    reloadData();
+    reloadData(true);
   });
 
   // ── 消息处理 ────────────────────────
@@ -431,6 +544,23 @@
         break;
       case 'commitDetail':
         renderCommitDetail(message.hash, message.files);
+        break;
+      case 'showHistory':
+        hideLoading();
+        isFetching = false;
+        renderSelectionHistory(message.filePath, message.startLine, message.endLine, message.commits);
+        break;
+      case 'showFileBlameStats':
+        renderFileBlameStats(message.fileName, message.stats);
+        break;
+      case 'clearFileBlameStats':
+        if (rightPaneState === RightPaneState.FILE_BLAME_STATS) {
+          setRightPaneVisible(0);
+          saveCurrentState();
+        }
+        break;
+      case 'setRightPaneState':
+        setRightPaneStateByNumber(message.state);
         break;
       case 'focusCommit':
         focusAndHighlightCommit(message.hash);
@@ -476,8 +606,14 @@
         currentStatsData = message.stats;
         renderStatsStrip(message.stats);
         if (rightPaneState === RightPaneState.OVERVIEW || rightPaneState === RightPaneState.LOADING) {
+          if (window._pendingForceExpand || rightPaneVisible === 1) {
+            setRightPane(RightPaneState.OVERVIEW);
+          } else {
+            setRightPane(RightPaneState.OVERVIEW);
+            setRightPaneVisible(0);
+          }
           renderOverviewStats(message.stats);
-          setRightPane(RightPaneState.OVERVIEW);
+          window._pendingForceExpand = false;
         } else if (rightPaneState === RightPaneState.AUTHOR && currentFocusedAuthor) {
           // Refresh author detail with new data
           const contrib = message.stats.contributors.find(c => c.author === currentFocusedAuthor);
@@ -588,6 +724,15 @@
 
     // ─── 1. 图表 Lane 分配算法（防重叠新版）─────────
 
+    const isFiltered = !!(
+      (authorSelect && authorSelect.value) ||
+      (sinceDate && sinceDate.value) ||
+      (untilDate && untilDate.value) ||
+      (datePresetSelect && datePresetSelect.value && datePresetSelect.value !== 'custom') ||
+      (searchInput && searchInput.value.trim())
+    );
+    const shouldDrawToBottom = hasMoreCommits && !isFiltered;
+
     const commitHashes = new Set(commits.map(c => c.hash));
     const hashToCommitMap = new Map();
     const hashToCommitRowMap = new Map();
@@ -637,6 +782,9 @@
     // Branch colors decoration mapping
     branchColorMap.clear();
 
+    let nextColorIdx = 1;
+    const laneColorIndices = [0]; // lane 0 is mainTrunk, initialized to color index 0
+
     for (let r = 0; r < commits.length; r++) {
       const c = commits[r];
       const hash = c.hash;
@@ -654,9 +802,11 @@
           } else {
             lanes[0] = hash;
           }
+          laneColorIndices[0] = 0;
         } else {
           laneIdx = getEmptyLaneIndex(false);
           lanes[laneIdx] = hash;
+          laneColorIndices[laneIdx] = nextColorIdx++;
         }
       }
 
@@ -664,25 +814,30 @@
       lines.forEach(line => {
         if (line.toHash === hash) {
           line.toLane = laneIdx;
-          if (!line.isMergeLine) {
+          if (line.isMergeLine) {
             line.runningLane = laneIdx;
           }
         }
       });
 
-      // Record commit node position
-      commitNodes[hash] = { row: r, lane: laneIdx, isMerge };
+      // Record commit node position with its unique color index
+      const nodeColorIdx = laneColorIndices[laneIdx] !== undefined ? laneColorIndices[laneIdx] : 0;
+      commitNodes[hash] = { row: r, lane: laneIdx, isMerge, colorIdx: nodeColorIdx };
       maxLanes = Math.max(maxLanes, lanes.length);
 
       // Branch color mapping
       if (c.decorations && c.decorations.length > 0) {
         c.decorations.forEach(dec => {
-          branchColorMap.set(dec, colors[laneIdx % colors.length]);
+          branchColorMap.set(dec, colors[nodeColorIdx % colors.length]);
         });
       }
 
-      // 2. Free up the slot of the current commit in activeLanes
-      lanes[laneIdx] = null;
+      // 2. Free up all slots containing the current commit in activeLanes
+      for (let i = 0; i < lanes.length; i++) {
+        if (lanes[i] === hash) {
+          lanes[i] = null;
+        }
+      }
 
       // 3. Process parents to reserve lanes and generate lines
       if (parents.length > 0) {
@@ -697,19 +852,13 @@
             // If the current child has a smaller lane index (higher priority, closer to main trunk),
             // we should steal the parent reservation to this smaller lane index!
             if (laneIdx < targetLaneIdx) {
-              lanes[targetLaneIdx] = null;
               lanes[laneIdx] = p0;
               targetLaneIdx = laneIdx;
             }
           } else {
             // No other child has claimed p0 yet. p0 inherits this lane!
-            if (mainTrunk.has(p0)) {
-              targetLaneIdx = 0;
-              lanes[0] = p0;
-            } else {
-              targetLaneIdx = laneIdx;
-              lanes[laneIdx] = p0;
-            }
+            targetLaneIdx = laneIdx;
+            lanes[laneIdx] = p0;
           }
 
           lines.push({
@@ -717,21 +866,24 @@
             fromLane: laneIdx,
             toRow: p0Row,
             toLane: targetLaneIdx,
-            runningLane: targetLaneIdx,
+            runningLane: laneIdx,
             toHash: p0,
-            colorIdx: laneIdx
+            colorIdx: nodeColorIdx
           });
         } else {
           // Parent not loaded
-          lines.push({
-            fromRow: r,
-            fromLane: laneIdx,
-            toRow: r + 0.5,
-            toLane: laneIdx,
-            runningLane: laneIdx,
-            colorIdx: laneIdx,
-            fade: true
-          });
+          if (shouldDrawToBottom) {
+            lanes[laneIdx] = p0; // Keep the lane occupied with the parent hash
+            lines.push({
+              fromRow: r,
+              fromLane: laneIdx,
+              toRow: commits.length - 0.5,
+              toLane: laneIdx,
+              runningLane: laneIdx,
+              toHash: p0,
+              colorIdx: nodeColorIdx
+            });
+          }
         }
 
         // B. Secondary parents (merge sources)
@@ -758,17 +910,14 @@
               if (otherBranchChildLaneIdx !== -1) {
                 targetLaneIdx = otherBranchChildLaneIdx;
               } else {
-                if (mainTrunk.has(pk)) {
-                  targetLaneIdx = 0;
-                  lanes[0] = pk;
-                } else {
-                  // Allocate new lane for pk
-                  targetLaneIdx = getEmptyLaneIndex(false);
-                  lanes[targetLaneIdx] = pk;
-                }
+                // Allocate new lane for pk
+                targetLaneIdx = getEmptyLaneIndex(false);
+                lanes[targetLaneIdx] = pk;
+                laneColorIndices[targetLaneIdx] = nextColorIdx++;
               }
             }
 
+            const targetColorIdx = laneColorIndices[targetLaneIdx] !== undefined ? laneColorIndices[targetLaneIdx] : 0;
             lines.push({
               fromRow: r,
               fromLane: laneIdx,
@@ -776,21 +925,30 @@
               toLane: targetLaneIdx,
               runningLane: targetLaneIdx,
               toHash: pk,
-              colorIdx: targetLaneIdx,
+              colorIdx: targetColorIdx,
               isMergeLine: true
             });
           } else {
             // Secondary parent not loaded
-            const tempLane = laneIdx + 1;
-            lines.push({
-              fromRow: r,
-              fromLane: laneIdx,
-              toRow: r + 0.5,
-              toLane: tempLane,
-              runningLane: tempLane,
-              colorIdx: laneIdx,
-              fade: true
-            });
+            if (shouldDrawToBottom) {
+              let targetLaneIdx = lanes.indexOf(pk);
+              if (targetLaneIdx === -1) {
+                targetLaneIdx = getEmptyLaneIndex(false);
+                lanes[targetLaneIdx] = pk;
+                laneColorIndices[targetLaneIdx] = nextColorIdx++;
+              }
+              const targetColorIdx = laneColorIndices[targetLaneIdx] !== undefined ? laneColorIndices[targetLaneIdx] : 0;
+              lines.push({
+                fromRow: r,
+                fromLane: laneIdx,
+                toRow: commits.length - 0.5,
+                toLane: targetLaneIdx,
+                runningLane: targetLaneIdx,
+                toHash: pk,
+                colorIdx: targetColorIdx,
+                isMergeLine: true
+              });
+            }
           }
         }
       }
@@ -815,7 +973,7 @@
       const node = commitNodes[c.hash];
       if (!node) return;
       const lane = node.lane;
-      const laneColor = colors[lane % colors.length];
+      const laneColor = colors[node.colorIdx % colors.length];
 
       let resolvedBranch = null;
       if (c.decorations && c.decorations.length > 0) {
@@ -860,6 +1018,22 @@
 
 
 
+    // Calculate max lane for each row to adaptively adjust commit message padding
+    const rowMaxLanes = new Array(commits.length).fill(0);
+    for (const hash in commitNodes) {
+      const node = commitNodes[hash];
+      if (node.row < commits.length) {
+        rowMaxLanes[node.row] = Math.max(rowMaxLanes[node.row], node.lane);
+      }
+    }
+    for (const line of lines) {
+      const startRow = Math.max(0, Math.min(Math.floor(line.fromRow), Math.floor(line.toRow)));
+      const endRow = Math.min(commits.length - 1, Math.max(Math.ceil(line.fromRow), Math.ceil(line.toRow)));
+      for (let r = startRow; r <= endRow; r++) {
+        rowMaxLanes[r] = Math.max(rowMaxLanes[r], line.fromLane, line.toLane, line.runningLane || 0);
+      }
+    }
+
     // 动态图表宽度
     const computedGraphWidth = paddingLeft + (maxLanes + 1) * laneWidth;
     currentGraphWidth = computedGraphWidth;
@@ -886,8 +1060,9 @@
 
         const node = cachedCommitNodes[c.hash];
         if (node) {
-          const color = colors[node.lane % colors.length];
+          const color = colors[node.colorIdx % colors.length];
           tr.style.setProperty('--selection-glow-color', color);
+          tr.style.setProperty('--row-selected-glow-bg', hexToRgba(color, 0.08));
         }
 
         const relTime = getRelativeTime(c.timestamp);
@@ -918,8 +1093,8 @@
             }
 
             const style = isHead
-              ? `background-color: rgba(255,255,255,0.08); color: #fff;`
-              : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor};`;
+              ? `background-color: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.22);`
+              : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor}; border-color: ${hexToRgba(badgeColor, 0.35)};`;
 
             return `<span class="ref-badge ${badgeClass}" style="${style}">${iconHtml}${escapeHtml(displayDec)}</span>`;
           };
@@ -951,64 +1126,51 @@
         }
 
         // 列表页小头像计算
-        const authorColor = getAvatarColor(c.author);
-        const authorInitials = getInitials(c.author);
-        const authorAvatarHtml = `<span class="avatar-circle" style="background-color: ${authorColor}; width: 14px; height: 14px; font-size: 8px; margin-right: 5px; display: inline-flex; vertical-align: middle; line-height: 14px; border: none; box-shadow: none;">${escapeHtml(authorInitials)}</span>`;
+        const inlineAuthorHtml = `<span class="commit-author-inline" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</span>`;
 
         tr.innerHTML = `
-          <td class="graph-col" style="width: ${computedGraphWidth}px; min-width: ${computedGraphWidth}px;"></td>
-          <td class="content-col" colspan="4">
+          <td class="graph-col" style="display: none; width: ${computedGraphWidth}px; min-width: ${computedGraphWidth}px;"></td>
+          <td class="content-col" style="padding-left: ${paddingLeft + (rowMaxLanes[r] + 1) * laneWidth + 10}px !important;">
             <div class="row-content">
               <div class="commit-main">
                 <span class="commit-message" title="${escapeHtml(c.message)}">${escapeHtml(c.message)}</span>
+                ${inlineAuthorHtml}
                 ${decsHtml}
-              </div>
-              <div class="commit-meta">
-                <span class="commit-author" data-author="${escapeHtml(c.author)}" title="${escapeHtml(c.author)}">
-                  ${authorAvatarHtml}
-                  <span class="author-name-text" style="vertical-align: middle;">${escapeHtml(c.author)}</span>
-                </span>
-                <span class="commit-date" title="${relTime}"><span class="date-full">${absTime}</span><span class="date-short">${formatDateShort(c.timestamp)}</span></span>
-                <span class="hash-copyable" data-full-hash="${c.hash}">${c.hash.substring(0, 7)}</span>
               </div>
             </div>
           </td>
         `;
 
-        // 点击复制 hash
-        const hashEl = tr.querySelector('.hash-copyable');
-        hashEl.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const fullHash = hashEl.dataset.fullHash;
-          navigator.clipboard.writeText(fullHash).then(() => {
-            hashEl.textContent = '已复制!';
-            hashEl.classList.add('hash-copied');
-            setTimeout(() => {
-              hashEl.textContent = fullHash.substring(0, 7);
-              hashEl.classList.remove('hash-copied');
-            }, 1200);
-          });
-        });
-
         tr.addEventListener('click', () => handleRowClick(tr, c.hash, c.parents));
         
-        // GitLens Row Hover Highlighting
+        // Row hover — highlight the specific commit node and its lane
         tr.addEventListener('mouseenter', () => {
           const node = cachedCommitNodes[c.hash];
           if (node) {
-            const lane = node.lane % colors.length;
-            graphSvg.setAttribute('class', `hover-active hover-lane-${lane}`);
+            const branchId = node.colorIdx;
+            graphSvg.classList.add('hover-active');
+            graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
+            graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
           }
-          const circle = graphSvg.querySelector(`.node-${c.hash}`);
-          if (circle) {
-            circle.classList.add('hovered');
+          const el = graphSvg.querySelector(`.node-${c.hash}`);
+          if (el) {
+            el.classList.add('hovered');
+            if (el.parentNode && el.parentNode.tagName === 'g') {
+              el.parentNode.querySelectorAll('circle').forEach(cc => cc.classList.add('hovered'));
+            }
           }
         });
         tr.addEventListener('mouseleave', () => {
-          graphSvg.removeAttribute('class');
-          const circle = graphSvg.querySelector(`.node-${c.hash}`);
-          if (circle) {
-            circle.classList.remove('hovered');
+          graphSvg.classList.remove('hover-active');
+          graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
+          graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
+          
+          const el = graphSvg.querySelector(`.node-${c.hash}`);
+          if (el) {
+            el.classList.remove('hovered');
+            if (el.parentNode && el.parentNode.tagName === 'g') {
+              el.parentNode.querySelectorAll('circle').forEach(cc => cc.classList.remove('hovered'));
+            }
           }
         });
 
@@ -1016,8 +1178,13 @@
       } else {
         const graphCol = tr.querySelector('.graph-col');
         if (graphCol) {
+          graphCol.style.display = 'none';
           graphCol.style.width = computedGraphWidth + 'px';
           graphCol.style.minWidth = computedGraphWidth + 'px';
+        }
+        const contentCol = tr.querySelector('.content-col');
+        if (contentCol) {
+          contentCol.style.setProperty('padding-left', `${paddingLeft + (rowMaxLanes[r] + 1) * laneWidth + 10}px`, 'important');
         }
       }
     });
@@ -1028,6 +1195,7 @@
       if (selectedRow) {
         selectedRow.classList.add('selected');
         selectedCommitHash = oldSelectedHash;
+        selectCircleInGraph(oldSelectedHash);
       } else {
         collapseDetail();
       }
@@ -1054,22 +1222,34 @@
 
   function drawSvg() {
     graphSvg.innerHTML = '';
+    
+    // Clear hover state to prevent stuck dimming when SVG re-renders (e.g. on click)
+    graphSvg.classList.remove('hover-active');
+
+    function getBranchColor(branchId) {
+      if (branchId < colors.length) {
+        return colors[branchId];
+      }
+      // Infinite unique elegant colors using Golden Ratio (137.5 deg)
+      // Base hue is shifted to avoid landing exactly on predefined colors
+      const hue = (branchId * 137.508) % 360;
+      return `hsl(${hue}, 75%, 60%)`;
+    }
 
     if (commits.length === 0) {
       graphSvg.style.height = '0px';
       return;
     }
 
-    // Since the table is static now (no detail rows inline), height is always static
     const totalHeight = commits.length * rowHeight;
     graphSvg.style.height = totalHeight + 'px';
 
-    // Helper to get Y coordinate for any row index (float or int)
     function getYCoordinate(rowIndex) {
       return rowIndex * rowHeight + rowHeight / 2;
     }
 
-    // ─── 3. 渲染 SVG 连线 ─────────
+    // ── Path rendering (elegant "guqin string" style: smooth gentle S-curves) ──
+
     cachedLines.forEach(line => {
       const x_from = paddingLeft + line.fromLane * laneWidth;
       const x_run = paddingLeft + (line.runningLane !== undefined ? line.runningLane : line.fromLane) * laneWidth;
@@ -1077,116 +1257,145 @@
 
       const y1 = getYCoordinate(line.fromRow);
       const y2 = getYCoordinate(line.toRow);
-      const color = colors[line.colorIdx % colors.length];
-      const laneClass = `lane-${line.colorIdx % colors.length}`;
+      
+      const branchId = line.colorIdx;
+      const color = getBranchColor(branchId);
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('class', laneClass);
-      
-      if (line.fade) {
-        if (line.fromLane === line.toLane) {
-          const fadeLen = 12;
-          path.setAttribute('d', `M ${x_from} ${y1} L ${x_from} ${y1 + fadeLen}`);
-          path.setAttribute('stroke-dasharray', '2,2');
-          path.setAttribute('opacity', '0.4');
-        } else {
-          const fadeLen = 12;
-          const yStart = y1 + 2;
-          const yEnd = y1 + fadeLen - 2;
-          const cpY = y1 + fadeLen / 2;
-          path.setAttribute('d', `M ${x_from} ${y1} L ${x_from} ${yStart} C ${x_from} ${cpY}, ${x_to} ${cpY}, ${x_to} ${yEnd} L ${x_to} ${y1 + fadeLen}`);
-          path.setAttribute('stroke-dasharray', '2,2');
-          path.setAttribute('opacity', '0.4');
-        }
-      } else {
-        // General Metro-style path with runningLane in the middle
-        const curveHeight = Math.min(rowHeight * 0.7, (y2 - y1) * 0.35);
-        
-        let d = `M ${x_from} ${y1}`;
-        
-        // 1. Top transition from x_from to x_run
-        if (x_from !== x_run) {
-          const yStart = y1 + rowHeight * 0.15;
-          const yEnd = yStart + curveHeight;
-          const cpY = yStart + curveHeight * 0.5;
-          d += ` L ${x_from} ${yStart} C ${x_from} ${cpY}, ${x_run} ${cpY}, ${x_run} ${yEnd}`;
-        }
-        
-        // 2. Bottom transition from x_run to x_to
-        if (x_run !== x_to) {
-          const yEnd = y2 - rowHeight * 0.15;
-          const yStart = yEnd - curveHeight;
-          const cpY = yStart + curveHeight * 0.5;
-          
-          // Connect the end of top transition (or start if no top transition) to the start of bottom transition
-          const yStartVal = (x_from !== x_run) ? (y1 + rowHeight * 0.15 + curveHeight) : y1;
-          if (yStart > yStartVal) {
-            d += ` L ${x_run} ${yStart}`;
-          }
-          d += ` C ${x_run} ${cpY}, ${x_to} ${cpY}, ${x_to} ${yEnd} L ${x_to} ${y2}`;
-        } else {
-          // No bottom transition, just run straight to y2
-          const yStartVal = (x_from !== x_run) ? (y1 + rowHeight * 0.15 + curveHeight) : y1;
+      path.setAttribute('class', `lane-path-${branchId}`);
+
+      const isMergeLine = line.isMergeLine;
+      const isMainTrunk = (line.colorIdx === 0 && !isMergeLine);
+      const strokeWidth = isMainTrunk ? 2 : (isMergeLine ? 1.5 : 1.5);
+
+      const segH = y2 - y1;
+      const topCurve = (x_from !== x_run);
+      const botCurve = (x_run !== x_to);
+
+      let d = `M ${x_from} ${y1}`;
+
+      if (!topCurve && !botCurve) {
+        // Same lane throughout — straight vertical
+        d += ` L ${x_to} ${y2}`;
+      } else if (topCurve && !botCurve) {
+        // Curve early, then straight down
+        const curveH = Math.min(rowHeight, segH);
+        const y_mid = y1 + curveH / 2;
+        d += ` C ${x_from} ${y_mid}, ${x_run} ${y_mid}, ${x_run} ${y1 + curveH}`;
+        if (y1 + curveH < y2) {
           d += ` L ${x_run} ${y2}`;
         }
-        
-        path.setAttribute('d', d);
+      } else if (!topCurve && botCurve) {
+        // Straight down, then curve at the end
+        const curveH = Math.min(rowHeight, segH);
+        const curveStartY = y2 - curveH;
+        if (y1 < curveStartY) {
+          d += ` L ${x_run} ${curveStartY}`;
+        }
+        const y_mid = curveStartY + curveH / 2;
+        d += ` C ${x_run} ${y_mid}, ${x_to} ${y_mid}, ${x_to} ${y2}`;
+      } else {
+        // Both curve. Handle safely to prevent backwards tangents
+        const curveH = Math.min(rowHeight, segH / 2);
+        const topEnd = y1 + curveH;
+        const botStart = y2 - curveH;
+
+        d += ` C ${x_from} ${y1 + curveH/2}, ${x_run} ${y1 + curveH/2}, ${x_run} ${topEnd}`;
+        if (botStart > topEnd) {
+          d += ` L ${x_run} ${botStart}`;
+        }
+        d += ` C ${x_run} ${botStart + curveH/2}, ${x_to} ${botStart + curveH/2}, ${x_to} ${y2}`;
       }
-      
+
+      path.setAttribute('d', d);
       path.setAttribute('stroke', color);
-      path.setAttribute('stroke-width', '2.2');
+      path.setAttribute('stroke-width', strokeWidth.toString());
       path.setAttribute('fill', 'none');
 
-      // GitLens Hover events
       path.addEventListener('mouseover', () => {
-        const lane = line.colorIdx % colors.length;
-        graphSvg.setAttribute('class', `hover-active hover-lane-${lane}`);
+        const branchId = line.colorIdx;
+        graphSvg.classList.add('hover-active');
+        graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
+        graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
       });
       path.addEventListener('mouseout', () => {
-        graphSvg.removeAttribute('class');
+        graphSvg.classList.remove('hover-active');
+        graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
+        graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
       });
 
       graphSvg.appendChild(path);
     });
 
-    // ─── 4. 渲染 SVG 节点 ─────────
+    // ── Node rendering (clean, no glow, no ring) ──
+
     commits.forEach((c, r) => {
       const node = cachedCommitNodes[c.hash];
       if (!node) return;
       const x = paddingLeft + node.lane * laneWidth;
       const y = getYCoordinate(r);
-      const color = colors[node.lane % colors.length];
-      const laneClass = `lane-${node.lane % colors.length}`;
+      const branchId = node.colorIdx;
+      const color = getBranchColor(branchId);
+      const isSelected = (c.hash === selectedCommitHash);
 
-      // Render all nodes as circles (matching VS Code native Git Graph style)
-      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      circle.setAttribute('class', `${laneClass} node-${c.hash}`);
-      circle.setAttribute('cx', x);
-      circle.setAttribute('cy', y);
-      
-      // Merge commits are rendered as hollow circles (ring nodes)
       if (node.isMerge) {
-        circle.setAttribute('r', '5.5');
-        circle.setAttribute('fill', 'var(--bg-color)');
-        circle.setAttribute('stroke', color);
-        circle.setAttribute('stroke-width', '2.5');
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        group.setAttribute('class', `node-group-${c.hash}`);
+
+        const outer = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        outer.setAttribute('class', `node-${c.hash} lane-node-${branchId} merge-outer${isSelected ? ' selected' : ''}`);
+        outer.setAttribute('cx', x);
+        outer.setAttribute('cy', y);
+        outer.setAttribute('r', isSelected ? '6' : '5.5');
+        outer.setAttribute('fill', 'var(--bg-color)');
+        outer.setAttribute('stroke', color);
+        outer.setAttribute('stroke-width', '1.5');
+
+        const inner = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        inner.setAttribute('class', `node-${c.hash} lane-node-${branchId} merge-inner${isSelected ? ' selected' : ''}`);
+        inner.setAttribute('cx', x);
+        inner.setAttribute('cy', y);
+        inner.setAttribute('r', '2.5');
+        inner.setAttribute('fill', color);
+
+        group.appendChild(outer);
+        group.appendChild(inner);
+
+        group.addEventListener('mouseover', () => {
+          graphSvg.classList.add('hover-active');
+          graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
+          graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
+        });
+        group.addEventListener('mouseout', () => {
+          graphSvg.classList.remove('hover-active');
+          graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
+          graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
+        });
+
+        graphSvg.appendChild(group);
       } else {
-        circle.setAttribute('r', '4.5');
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('class', `node-${c.hash} lane-node-${branchId}${isSelected ? ' selected' : ''}`);
+        circle.setAttribute('cx', x);
+        circle.setAttribute('cy', y);
+        circle.setAttribute('r', isSelected ? '5' : '4.5');
         circle.setAttribute('fill', color);
         circle.setAttribute('stroke', 'var(--bg-color)');
-        circle.setAttribute('stroke-width', '2.5');
+        circle.setAttribute('stroke-width', '1.5');
+
+        circle.addEventListener('mouseover', () => {
+          graphSvg.classList.add('hover-active');
+          graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
+          graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
+        });
+        circle.addEventListener('mouseout', () => {
+          graphSvg.classList.remove('hover-active');
+          graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
+          graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
+        });
+
+        graphSvg.appendChild(circle);
       }
-
-      // GitLens Hover events
-      circle.addEventListener('mouseover', () => {
-        const lane = node.lane % colors.length;
-        graphSvg.setAttribute('class', `hover-active hover-lane-${lane}`);
-      });
-      circle.addEventListener('mouseout', () => {
-        graphSvg.removeAttribute('class');
-      });
-
-      graphSvg.appendChild(circle);
     });
   }
 
@@ -1207,11 +1416,13 @@
     selectedCommitHash = hash;
     saveCurrentState();
     row.classList.add('selected');
+    selectCircleInGraph(hash);
 
     const commit = commits.find(c => c.hash === hash);
     if (!commit) return;
 
     // 仅在原先处于空状态时，才显示详情框并触发 slideDown 动画
+    ensureDetailsExpanded();
     setRightPane(RightPaneState.COMMIT);
 
     detailHashBadge.textContent = hash.substring(0, 7);
@@ -1221,8 +1432,8 @@
     if (detailAuthorName && detailAuthorDate && detailAuthorAvatar) {
       detailAuthorName.textContent = commit.author;
       detailAuthorName.title = commit.email || '';
-      detailAuthorDate.textContent = getRelativeTime(commit.timestamp);
-      detailAuthorDate.title = formatDate(commit.timestamp);
+      detailAuthorDate.textContent = formatDate(commit.timestamp);
+      detailAuthorDate.title = getRelativeTime(commit.timestamp);
       
       const initials = getInitials(commit.author);
       detailAuthorAvatar.textContent = initials;
@@ -1262,8 +1473,8 @@
           }
 
           const style = isHead
-            ? `background-color: rgba(255,255,255,0.08); color: #fff;`
-            : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor};`;
+            ? `background-color: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.22);`
+            : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor}; border-color: ${hexToRgba(badgeColor, 0.35)};`;
 
           const span = document.createElement('span');
           span.className = `ref-badge ${badgeClass}`;
@@ -1282,7 +1493,7 @@
           branchesContainer.classList.remove('hidden');
           const span = document.createElement('span');
           span.className = 'ref-badge badge-branch';
-          span.style.cssText = `background-color: ${hexToRgba(laneBranch.color, 0.15)}; color: ${laneBranch.color};`;
+          span.style.cssText = `background-color: ${hexToRgba(laneBranch.color, 0.15)}; color: ${laneBranch.color}; border-color: ${hexToRgba(laneBranch.color, 0.35)};`;
           span.innerHTML = `<i class="codicon codicon-git-branch"></i>${escapeHtml(laneBranch.name)}`;
           branchesContainer.appendChild(span);
         }
@@ -1364,14 +1575,16 @@
       previouslySelected.classList.remove('selected');
     }
     selectedCommitHash = null;
+    
+    setRightPaneVisible(0);
+    
     saveCurrentState();
+    selectCircleInGraph(null);
+  }
 
-    // Return to overview stats (or loading if no stats yet)
-    if (currentStatsData) {
-      setRightPane(RightPaneState.OVERVIEW);
-    } else {
-      setRightPane(RightPaneState.LOADING);
-    }
+  function selectCircleInGraph(hash) {
+    // Redraw SVG to properly render selection ring and glow effects
+    drawSvg();
   }
 
   // ── 文件树构建 + 路径压缩 ────────────────────────
@@ -1695,21 +1908,41 @@
   resizerBar.addEventListener('mousedown', (e) => {
     isDragging = true;
     resizerBar.classList.add('dragging');
-    document.body.style.cursor = 'col-resize';
+    document.body.style.cursor = isOverlayMode ? 'row-resize' : 'col-resize';
     document.body.style.userSelect = 'none';
   });
 
   document.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
 
-    const containerWidth = document.querySelector('.main-layout').clientWidth;
-    const detailsWidth = containerWidth - e.clientX;
-    
-    const minWidth = 280;
-    const maxWidth = containerWidth * 0.6;
-    
-    let finalWidth = Math.max(minWidth, Math.min(maxWidth, detailsWidth));
-    detailsPane.style.width = finalWidth + 'px';
+    const layoutEl = document.querySelector('.main-layout');
+    if (isOverlayMode) {
+      // Stacking mode (vertical resizing)
+      const containerHeight = layoutEl.clientHeight;
+      const detailsHeight = containerHeight - e.clientY;
+      const minHeight = 80;
+      const maxHeight = containerHeight * 0.8;
+      let finalHeight = Math.max(minHeight, Math.min(maxHeight, detailsHeight));
+      
+      detailsPane.style.height = finalHeight + 'px';
+      detailsPane.style.width = '100%';
+      
+      const leftPaneHeight = containerHeight - finalHeight - 4;
+      leftPaneEl.style.height = leftPaneHeight + 'px';
+      leftPaneEl.style.flex = 'none';
+    } else {
+      // Horizontal mode
+      const containerWidth = layoutEl.clientWidth;
+      const detailsWidth = containerWidth - e.clientX;
+      const minWidth = 280;
+      const maxWidth = containerWidth * 0.6;
+      let finalWidth = Math.max(minWidth, Math.min(maxWidth, detailsWidth));
+      
+      detailsPane.style.width = finalWidth + 'px';
+      detailsPane.style.height = '100%';
+      leftPaneEl.style.height = '100%';
+      leftPaneEl.style.flex = '1';
+    }
   });
 
   document.addEventListener('mouseup', () => {
@@ -1744,13 +1977,14 @@
   }
 
   function renderStatsStrip(stats) {
+    if (!statsStrip) return;
     statsStrip.classList.remove('hidden');
-    stripCommitsVal.textContent = fmtNum(stats.totalCommits);
-    stripAdd.textContent = '+' + fmtNum(stats.totalAdditions);
-    stripDel.textContent = '-' + fmtNum(stats.totalDeletions);
-    stripContributorsVal.textContent = stats.contributors.length;
+    if (stripCommitsVal) stripCommitsVal.textContent = fmtNum(stats.totalCommits);
+    if (stripAdd) stripAdd.textContent = '+' + fmtNum(stats.totalAdditions);
+    if (stripDel) stripDel.textContent = '-' + fmtNum(stats.totalDeletions);
+    if (stripContributorsVal) stripContributorsVal.textContent = stats.contributors.length;
     const range = `${stats.sinceDate} ~ ${stats.untilDate}`;
-    stripRange.textContent = range;
+    if (stripRange) stripRange.textContent = range;
   }
 
   function renderOverviewStats(stats) {
@@ -2057,6 +2291,7 @@
 
   function showAuthorDetail(contributor) {
     currentFocusedAuthor = contributor.author;
+    ensureDetailsExpanded();
     setRightPane(RightPaneState.AUTHOR);
 
     const color = getAvatarColor(contributor.author);
@@ -2103,28 +2338,19 @@
     }
   }
 
-  // Back button
-  authorBackBtn.addEventListener('click', () => {
-    currentFocusedAuthor = null;
-    if (currentStatsData) {
-      renderOverviewStats(currentStatsData);
-      setRightPane(RightPaneState.OVERVIEW);
-    } else {
-      setRightPane(RightPaneState.LOADING);
-    }
-  });
-
   // Stats toggle button — force show overview
-  statsToggleBtn.addEventListener('click', () => {
-    if (currentStatsData) {
-      // Deselect any commit
-      const sel = commitsTbody.querySelector('tr.commit-row.selected');
-      if (sel) sel.classList.remove('selected');
-      selectedCommitHash = null;
-      renderOverviewStats(currentStatsData);
-      setRightPane(RightPaneState.OVERVIEW);
-    }
-  });
+  if (statsToggleBtn) {
+    statsToggleBtn.addEventListener('click', () => {
+      if (currentStatsData) {
+        // Deselect any commit
+        const sel = commitsTbody.querySelector('tr.commit-row.selected');
+        if (sel) sel.classList.remove('selected');
+        selectedCommitHash = null;
+        renderOverviewStats(currentStatsData);
+        setRightPane(RightPaneState.OVERVIEW);
+      }
+    });
+  }
 
   // Author highlight button — set author filter in graph
   authorHighlightBtn.addEventListener('click', () => {
@@ -2146,9 +2372,9 @@
   // （作者统计仍可通过右侧 Overview 面板中的贡献者列表访问）
 
   // ── 响应式断点：监听左侧面板宽度，动态切换 pane-compact / pane-narrow ──
-  const leftPaneEl = document.querySelector('.left-pane');
   if (leftPaneEl && window.ResizeObserver) {
     const paneObserver = new ResizeObserver(entries => {
+      if (!entries || entries.length === 0) return;
       const w = entries[0].contentRect.width;
       leftPaneEl.classList.toggle('pane-medium',  w < 480);
       leftPaneEl.classList.toggle('pane-compact', w < 320);
@@ -2168,11 +2394,8 @@
     paneObserver.observe(leftPaneEl);
   }
 
-  // ── 窄屏 Overlay 模式：监听整体 main-layout 宽度 ──
-  // isOverlayMode is declared at the top with other state variables
-  const mainLayoutEl = document.querySelector('.main-layout');
+  // ── 窄屏 Layout 模式：监听整体 main-layout 宽度 ──
   const overlayBackdrop = document.getElementById('overlay-backdrop');
-  const overlayCloseBtn = document.getElementById('overlay-close-btn');
   const OVERLAY_BREAKPOINT = 550;
 
   function openOverlay() {
@@ -2188,31 +2411,32 @@
   if (overlayBackdrop) {
     overlayBackdrop.addEventListener('click', closeOverlay);
   }
-  if (overlayCloseBtn) {
-    overlayCloseBtn.addEventListener('click', closeOverlay);
+  if (detailsCloseBtn) {
+    detailsCloseBtn.addEventListener('click', () => {
+      setRightPaneVisible(0);
+      saveCurrentState();
+    });
   }
 
   // setRightPane already handles overlay via isOverlayMode (see top of file)
   if (mainLayoutEl && window.ResizeObserver) {
     const layoutObserver = new ResizeObserver(entries => {
+      if (!entries || entries.length === 0) return;
       const w = entries[0].contentRect.width;
       const shouldBeNarrow = w < OVERLAY_BREAKPOINT;
       if (shouldBeNarrow === isOverlayMode) return;
       isOverlayMode = shouldBeNarrow;
       mainLayoutEl.classList.toggle('layout-narrow', isOverlayMode);
-      if (!isOverlayMode) {
-        // 退出 overlay 模式时，确保面板可见（重置 transform）
-        closeOverlay();
-        detailsPane.style.width = '';
-      } else {
-        // 进入 overlay 模式时，如果当前有内容则保持打开
-        closeOverlay();
-      }
+      // Reset inline styles to let CSS media queries take over correctly
+      detailsPane.style.width = '';
+      detailsPane.style.height = '';
+      leftPaneEl.style.height = '';
+      leftPaneEl.style.flex = '';
     });
     layoutObserver.observe(mainLayoutEl);
   }
 
-  if (activitySvg && window.ResizeObserver) {
+  if (activitySvg && activitySvg.parentElement && window.ResizeObserver) {
     let resizeTimer = null;
     const chartObserver = new ResizeObserver(() => {
       if (resizeTimer) cancelAnimationFrame(resizeTimer);
@@ -2225,19 +2449,428 @@
     chartObserver.observe(activitySvg.parentElement);
   }
 
-  // 在 overlay 模式下，点击提交行 → 打开面板
-  commitsTbody.addEventListener('click', () => {
-    if (isOverlayMode) {
-      // 延迟一帧等待右侧面板内容更新
-      requestAnimationFrame(openOverlay);
-    }
-  });
+  // ── Selection History Rendering ────────────────
+  const historyFileInfoEl = document.getElementById('history-file-info');
+  const historyListEl = document.getElementById('history-list');
 
-  // stats toggle btn 在 overlay 模式下 → 打开 overlay
-  const _origStatsToggleHandler = statsToggleBtn.onclick;
-  statsToggleBtn.addEventListener('click', () => {
-    if (isOverlayMode && currentStatsData) {
-      requestAnimationFrame(openOverlay);
+  let activeHistoryHash = null;
+
+  function renderSelectionHistory(filePath, startLine, endLine, historyCommits) {
+    activeHistoryHash = null;
+    ensureDetailsExpanded();
+    setRightPane(RightPaneState.HISTORY);
+    
+    if (historyFileInfoEl) {
+      historyFileInfoEl.innerHTML = `<div><i class="codicon codicon-file"></i> ${escapeHtml(filePath)}</div><div style="margin-top: 3px; font-weight: 500;"><i class="codicon codicon-list-flat"></i> 行 ${startLine} - ${endLine}</div>`;
     }
-  });
+
+    if (historyListEl) {
+      historyListEl.innerHTML = '';
+      if (!historyCommits || historyCommits.length === 0) {
+        historyListEl.innerHTML = '<div class="empty-state">没有历史记录</div>';
+        return;
+      }
+
+      historyCommits.forEach(c => {
+        const card = document.createElement('div');
+        card.className = 'history-card';
+        card.dataset.hash = c.hash;
+        
+        const shortHash = c.hash.substring(0, 7);
+        const relTime = getRelativeTime(c.timestamp);
+        
+        card.innerHTML = `
+          <div class="history-card-header">
+            <span class="history-card-author"><i class="codicon codicon-person"></i> ${escapeHtml(c.author)}</span>
+            <span class="history-card-date">${relTime}</span>
+          </div>
+          <div class="history-card-msg">${escapeHtml(c.message)}</div>
+          <div class="history-card-footer">
+            <span class="history-card-hash"><i class="codicon codicon-git-commit"></i> ${shortHash}</span>
+          </div>
+        `;
+        
+        card.addEventListener('click', () => {
+          // Highlight active card
+          historyListEl.querySelectorAll('.history-card').forEach(el => el.classList.remove('active'));
+          card.classList.add('active');
+          activeHistoryHash = c.hash;
+
+          // postMessage to open diff
+          vscode.postMessage({
+            command: 'openSingleDiff',
+            file: filePath,
+            hash: c.hash,
+            parentHash: c.parentHash,
+            lineRange: c.lineRange
+          });
+        });
+
+        historyListEl.appendChild(card);
+      });
+    }
+  }
+
+  // ── File Blame Stats Rendering ─────────────────
+  let lockedSliceHash = null;
+  let lockedSliceColor = null;
+
+  function renderFileBlameStats(fileName, stats) {
+    rightPaneState = RightPaneState.FILE_BLAME_STATS;
+    ensureDetailsExpanded();
+    setRightPane(RightPaneState.FILE_BLAME_STATS);
+    
+    lockedSliceHash = null;
+    lockedSliceColor = null;
+
+    const infoEl = document.getElementById('file-blame-info');
+    if (infoEl) {
+      infoEl.innerHTML = `<i class="codicon codicon-file"></i> ${escapeHtml(fileName)}`;
+    }
+
+    const listEl = document.getElementById('file-blame-list');
+    if (listEl) {
+      listEl.innerHTML = '';
+    }
+
+    if (!stats || stats.length === 0) {
+      renderRoseChart([]);
+      if (listEl) {
+        listEl.innerHTML = '<div class="empty-state">暂无作者数据</div>';
+      }
+      return;
+    }
+
+    const totalLines = stats.reduce((sum, s) => sum + s.lines, 0);
+
+    // Populate list
+    if (listEl) {
+      stats.forEach((s, i) => {
+        const color = getAvatarColor(s.hash);
+        const pct = ((s.lines / totalLines) * 100).toFixed(1);
+        
+        const item = document.createElement('div');
+        item.className = 'blame-list-item';
+        item.innerHTML = `
+          <div class="blame-list-author">
+            <span class="blame-color-dot" style="background-color: ${color}"></span>
+            <span>${escapeHtml(s.author)}</span>
+          </div>
+          <div class="blame-list-stats">
+            <span>${s.lines} 行</span>
+            <span class="blame-list-pct">${pct}%</span>
+          </div>
+        `;
+        listEl.appendChild(item);
+      });
+    }
+
+    renderRoseChart(stats, totalLines);
+  }
+
+  function renderRoseChart(stats, totalLines) {
+    const svg = document.getElementById('rose-chart-svg');
+    const tooltip = document.getElementById('rose-chart-tooltip');
+    if (!svg) return;
+
+    svg.innerHTML = '';
+
+    if (!stats || stats.length === 0 || totalLines === 0) return;
+
+    const centerX = 0;
+    const centerY = 0;
+    // Increase viewBox and maxRadius to fit labels
+    svg.setAttribute('viewBox', '-130 -130 260 260');
+    const maxRadius = 100;
+    const minRadius = 0; // True Nightingale chart starts from center
+    
+    // Sort by lines descending to give a classic rose chart look
+    const sortedStats = [...stats].sort((a, b) => b.lines - a.lines);
+    const maxLines = sortedStats[0].lines;
+
+    // Angle per item is equal
+    const angleStep = (Math.PI * 2) / sortedStats.length;
+    let currentAngle = -Math.PI / 2; // Start at top
+
+    // --- Draw concentric grid lines (Polar Grid) ---
+    const gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    gridGroup.setAttribute('class', 'rose-grid');
+    [0.25, 0.5, 0.75, 1.0].forEach(ratio => {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', centerX);
+      circle.setAttribute('cy', centerY);
+      circle.setAttribute('r', maxRadius * ratio);
+      circle.setAttribute('fill', 'none');
+      circle.setAttribute('stroke', 'var(--vscode-editorGhostText-foreground)');
+      circle.setAttribute('stroke-width', '0.5');
+      circle.setAttribute('stroke-dasharray', '2,2');
+      circle.setAttribute('opacity', '0.3');
+      gridGroup.appendChild(circle);
+    });
+    
+    // --- Draw radial grid lines ---
+    for (let i = 0; i < sortedStats.length; i++) {
+      const angle = currentAngle + i * angleStep;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', centerX);
+      line.setAttribute('y1', centerY);
+      line.setAttribute('x2', centerX + maxRadius * Math.cos(angle));
+      line.setAttribute('y2', centerY + maxRadius * Math.sin(angle));
+      line.setAttribute('stroke', 'var(--vscode-editorGhostText-foreground)');
+      line.setAttribute('stroke-width', '0.5');
+      line.setAttribute('opacity', '0.2');
+      gridGroup.appendChild(line);
+    }
+    svg.appendChild(gridGroup);
+
+    // Keep track of slice paths
+    const paths = [];
+
+    // State helper to get synced color
+    function getCommitColor(hash) {
+      const node = cachedCommitNodes[hash];
+      if (node) {
+        return colors[node.colorIdx % colors.length];
+      }
+      return getAvatarColor(hash);
+    }
+
+    let hoveredSliceHash = null;
+
+    // Helper to update styling of all wedges
+    function updateSliceStyles() {
+      paths.forEach(item => {
+        const { pathEl, hash, baseColor } = item;
+        
+        if (lockedSliceHash) {
+          if (hash === lockedSliceHash) {
+            pathEl.setAttribute('fill', baseColor);
+            pathEl.setAttribute('opacity', '1.0');
+            pathEl.setAttribute('stroke', 'var(--vscode-focusBorder, #007fd4)');
+            pathEl.setAttribute('stroke-width', '2.0');
+            pathEl.setAttribute('transform', 'scale(1.08)');
+          } else if (hoveredSliceHash && hash === hoveredSliceHash) {
+            pathEl.setAttribute('fill', baseColor);
+            pathEl.setAttribute('opacity', '1.0');
+            pathEl.setAttribute('stroke', 'var(--surface-1)');
+            pathEl.setAttribute('stroke-width', '1.5');
+            pathEl.setAttribute('transform', 'scale(1.04)');
+          } else {
+            pathEl.setAttribute('fill', hexToRgba(baseColor, 0.3));
+            pathEl.setAttribute('opacity', '0.2');
+            pathEl.setAttribute('stroke', 'var(--surface-1)');
+            pathEl.setAttribute('stroke-width', '1.5');
+            pathEl.setAttribute('transform', 'scale(1)');
+          }
+        } else if (hoveredSliceHash) {
+          if (hash === hoveredSliceHash) {
+            pathEl.setAttribute('fill', baseColor);
+            pathEl.setAttribute('opacity', '1.0');
+            pathEl.setAttribute('stroke', 'var(--surface-1)');
+            pathEl.setAttribute('stroke-width', '1.5');
+            pathEl.setAttribute('transform', 'scale(1.08)');
+          } else {
+            pathEl.setAttribute('fill', hexToRgba(baseColor, 0.3));
+            pathEl.setAttribute('opacity', '0.2');
+            pathEl.setAttribute('stroke', 'var(--surface-1)');
+            pathEl.setAttribute('stroke-width', '1.5');
+            pathEl.setAttribute('transform', 'scale(1)');
+          }
+        } else {
+          pathEl.setAttribute('fill', hexToRgba(baseColor, 0.8));
+          pathEl.setAttribute('opacity', '1.0');
+          pathEl.setAttribute('stroke', 'var(--surface-1)');
+          pathEl.setAttribute('stroke-width', '1.5');
+          pathEl.setAttribute('transform', 'scale(1)');
+        }
+      });
+    }
+
+    // --- Draw wedges (Coxcomb Slices) ---
+    sortedStats.forEach((s, i) => {
+      const normalizedRatio = Math.sqrt(s.lines / maxLines);
+      const radius = minRadius + (maxRadius - minRadius) * normalizedRatio;
+      
+      const startAngle = currentAngle;
+      const endAngle = currentAngle + angleStep;
+      const midAngle = startAngle + angleStep / 2;
+      
+      const x1 = centerX + radius * Math.cos(startAngle);
+      const y1 = centerY + radius * Math.sin(startAngle);
+      const x2 = centerX + radius * Math.cos(endAngle);
+      const y2 = centerY + radius * Math.sin(endAngle);
+      
+      const minX1 = centerX + minRadius * Math.cos(startAngle);
+      const minY1 = centerY + minRadius * Math.sin(startAngle);
+      const minX2 = centerX + minRadius * Math.cos(endAngle);
+      const minY2 = centerY + minRadius * Math.sin(endAngle);
+      
+      const largeArcFlag = angleStep > Math.PI ? 1 : 0;
+      
+      let pathData;
+      if (sortedStats.length === 1) {
+        pathData = `M 0 ${-radius} A ${radius} ${radius} 0 1 1 0 ${radius} A ${radius} ${radius} 0 1 1 0 ${-radius} Z`;
+      } else {
+        pathData = [
+          `M ${minX1} ${minY1}`,
+          `L ${x1} ${y1}`,
+          `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`,
+          `L ${minX2} ${minY2}`,
+          `A ${minRadius} ${minRadius} 0 ${largeArcFlag} 0 ${minX1} ${minY1}`,
+          `Z`
+        ].join(' ');
+      }
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', pathData);
+      path.style.cursor = 'pointer';
+      
+      const color = getCommitColor(s.hash);
+      const pct = ((s.lines / totalLines) * 100).toFixed(1);
+
+      paths.push({
+        pathEl: path,
+        hash: s.hash,
+        baseColor: color
+      });
+
+      // Mouse enter
+      path.addEventListener('mouseenter', (e) => {
+        hoveredSliceHash = s.hash;
+        updateSliceStyles();
+        
+        if (tooltip) {
+          const shortHash = s.hash.substring(0, 7);
+          const maxMsgLen = 45;
+          const msg = s.summary.length > maxMsgLen ? s.summary.substring(0, maxMsgLen) + '...' : s.summary;
+          tooltip.innerHTML = `
+            <div style="font-weight: 600; margin-bottom: 3px; display: flex; align-items: center; gap: 4px;">
+              <i class="codicon codicon-git-commit" style="font-size: 11px;"></i>
+              <span>${shortHash}</span>
+            </div>
+            <div style="opacity: 0.85; margin-bottom: 3px; white-space: normal; max-width: 200px; word-break: break-all;">${escapeHtml(msg || '')}</div>
+            <div style="font-size: 10px; opacity: 0.7; margin-bottom: 2px;">
+              <i class="codicon codicon-person" style="font-size: 9px; margin-right: 2px;"></i>${escapeHtml(s.author)}
+            </div>
+            <div style="font-weight: 500; color: var(--accent);">${s.lines} 行 (${pct}%)</div>
+          `;
+          tooltip.classList.remove('hidden');
+        }
+
+        // Notify editor to highlight
+        vscode.postMessage({
+          command: 'hoverBlameCommit',
+          hash: s.hash,
+          color: hexToRgba(color, 0.25)
+        });
+      });
+      
+      // Mouse move
+      path.addEventListener('mousemove', (e) => {
+        if (tooltip) {
+          const containerRect = svg.parentElement.getBoundingClientRect();
+          const x = e.clientX - containerRect.left;
+          const y = e.clientY - containerRect.top;
+          tooltip.style.left = (x + 10) + 'px';
+          tooltip.style.top = (y + 10) + 'px';
+        }
+      });
+      
+      // Mouse leave
+      path.addEventListener('mouseleave', () => {
+        hoveredSliceHash = null;
+        updateSliceStyles();
+        
+        if (tooltip) {
+          tooltip.classList.add('hidden');
+        }
+
+        // Clear editor highlight unless there is a locked slice
+        if (lockedSliceHash) {
+          vscode.postMessage({
+            command: 'hoverBlameCommit',
+            hash: lockedSliceHash,
+            color: hexToRgba(lockedSliceColor, 0.25)
+          });
+        } else {
+          vscode.postMessage({ command: 'clearHoverBlameCommit' });
+        }
+      });
+
+      // Click: Lock / Unlock slice
+      path.addEventListener('click', (e) => {
+        e.stopPropagation(); // prevent bubbling to svg background click
+        if (lockedSliceHash === s.hash) {
+          // Unlock
+          lockedSliceHash = null;
+          lockedSliceColor = null;
+        } else {
+          // Lock
+          lockedSliceHash = s.hash;
+          lockedSliceColor = color;
+        }
+        updateSliceStyles();
+        
+        // Ensure Editor is highlighted with current lock or hover
+        if (lockedSliceHash) {
+          vscode.postMessage({
+            command: 'hoverBlameCommit',
+            hash: lockedSliceHash,
+            color: hexToRgba(lockedSliceColor, 0.25)
+          });
+        } else {
+          // If unlocked, highlight the hovered one
+          vscode.postMessage({
+            command: 'hoverBlameCommit',
+            hash: s.hash,
+            color: hexToRgba(color, 0.25)
+          });
+        }
+      });
+
+      svg.appendChild(path);
+      
+      currentAngle = endAngle;
+    });
+
+    // Handle initial styles (e.g. if lockedSliceHash is already set)
+    updateSliceStyles();
+
+    // Click SVG empty space to unlock
+    svg.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'path') {
+        lockedSliceHash = null;
+        lockedSliceColor = null;
+        updateSliceStyles();
+        vscode.postMessage({ command: 'clearHoverBlameCommit' });
+      }
+    });
+  }
+
+  // ── 点击图谱或列表空白处收起面板 ────────────────
+  const containerContainer = document.querySelector('.container');
+  if (containerContainer) {
+    containerContainer.addEventListener('click', (e) => {
+      // 检查点击目标是否在 svg 或 list-pane 内，但不是具体的行或节点
+      if (rightPaneState === RightPaneState.HISTORY || rightPaneState === RightPaneState.FILE_BLAME_STATS) {
+        return; // 在追溯模式下不轻易收起
+      }
+      
+      const inSvg = e.target.closest('#graph-svg');
+      const inList = e.target.closest('.list-pane');
+      const isRow = e.target.closest('.commit-row');
+      const isNode = e.target.closest('.commit-node');
+      
+      if ((inSvg || inList) && !isRow && !isNode) {
+        if (rightPaneVisible === 1) {
+          setRightPaneVisible(0);
+          saveCurrentState();
+        }
+        if (selectedCommitHash) {
+          collapseDetail();
+        }
+      }
+    });
+  }
+
 })();

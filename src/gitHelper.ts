@@ -27,6 +27,12 @@ export interface CommitDiff {
   timestamp: number;
   message: string;
   diffLines: DiffLine[];
+  lineRange?: {
+    oldStart: number;
+    oldLength: number;
+    newStart: number;
+    newLength: number;
+  };
 }
 
 export interface GitFilters {
@@ -497,11 +503,22 @@ export async function traceLineHistory(
           seenDiffHeader = true;
           continue;
         }
+        if (line.startsWith('@@ ')) {
+          const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+          if (match) {
+            currentCommit.lineRange = {
+              oldStart: parseInt(match[1], 10),
+              oldLength: match[2] !== undefined ? parseInt(match[2], 10) : 1,
+              newStart: parseInt(match[3], 10),
+              newLength: match[4] !== undefined ? parseInt(match[4], 10) : 1
+            };
+          }
+          continue;
+        }
         if (
           line.startsWith('---') ||
           line.startsWith('+++') ||
-          line.startsWith('index ') ||
-          line.startsWith('@@ ')
+          line.startsWith('index ')
         ) {
           continue;
         }
@@ -602,7 +619,7 @@ export async function getCodeStats(
     effectiveUntilVal += ' 23:59:59';
   }
 
-  const args = ['log', '--no-merges', '--numstat',
+  const args = ['log', '--no-merges', '--numstat', '--no-renames',
     '--pretty=format:COMMIT_STAT|%H|%an|%ae|%at'];
 
   if (filters.branch) {
