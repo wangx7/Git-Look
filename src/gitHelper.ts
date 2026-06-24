@@ -126,6 +126,7 @@ interface InFlightEntry {
   promise: Promise<string>;
   signals: Set<AbortSignal>;
   controller: AbortController;
+  nonAbortableCount: number;
 }
 
 const inFlightEntries = new Map<string, InFlightEntry>();
@@ -155,7 +156,8 @@ export async function execGit(args: string[], cwd: string, signal?: AbortSignal)
     entry = {
       promise,
       signals: new Set<AbortSignal>(),
-      controller
+      controller,
+      nonAbortableCount: 0
     };
     inFlightEntries.set(cacheKey, entry);
     
@@ -170,6 +172,8 @@ export async function execGit(args: string[], cwd: string, signal?: AbortSignal)
   
   if (signal) {
     entry.signals.add(signal);
+  } else {
+    entry.nonAbortableCount++;
   }
   
   const currentEntry = entry; // capture local reference
@@ -178,8 +182,8 @@ export async function execGit(args: string[], cwd: string, signal?: AbortSignal)
     const onAbort = () => {
       if (signal) {
         currentEntry.signals.delete(signal);
-        // If no other signals are waiting, abort the child process
-        if (currentEntry.signals.size === 0) {
+        // If no other signals or non-abortable callers are waiting, abort the child process
+        if (currentEntry.signals.size === 0 && currentEntry.nonAbortableCount === 0) {
           currentEntry.controller.abort();
         }
       }

@@ -2377,43 +2377,12 @@ import { RightPaneState } from './types';
       infoEl.innerHTML = `<i class="codicon codicon-file"></i> ${escapeHtml(fileName)}`;
     }
 
-    const listEl = document.getElementById('file-blame-list');
-    if (listEl) {
-      listEl.innerHTML = '';
-    }
-
     if (!stats || stats.length === 0) {
       renderRoseChart([], 0);
-      if (listEl) {
-        listEl.innerHTML = '<div class="empty-state">暂无作者数据</div>';
-      }
       return;
     }
 
     const totalLines = stats.reduce((sum, s) => sum + s.lines, 0);
-
-    // Populate list
-    if (listEl) {
-      stats.forEach((s, i) => {
-        const color = getAvatarColor(s.hash);
-        const pct = ((s.lines / totalLines) * 100).toFixed(1);
-        
-        const item = document.createElement('div');
-        item.className = 'blame-list-item';
-        item.innerHTML = `
-          <div class="blame-list-author">
-            <span class="blame-color-dot" style="background-color: ${color}"></span>
-            <span>${escapeHtml(s.author)}</span>
-          </div>
-          <div class="blame-list-stats">
-            <span>${s.lines} 行</span>
-            <span class="blame-list-pct">${pct}%</span>
-          </div>
-        `;
-        listEl.appendChild(item);
-      });
-    }
-
     renderRoseChart(stats, totalLines);
   }
 
