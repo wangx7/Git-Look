@@ -33,6 +33,8 @@ export interface CommitDiff {
     newStart: number;
     newLength: number;
   };
+  oldFilePath?: string;
+  newFilePath?: string;
 }
 
 export interface GitFilters {
@@ -98,7 +100,124 @@ async function getGitPath(): Promise<string> {
   return 'git';
 }
 
+export async function toGitUri(uri: vscode.Uri, ref: string): Promise<vscode.Uri> {
+  try {
+    const gitExtension = vscode.extensions.getExtension<any>('vscode.git');
+    if (gitExtension) {
+      const activated = gitExtension.isActive ? gitExtension.exports : await gitExtension.activate();
+      const api = activated.getAPI(1);
+      if (api && typeof api.toGitUri === 'function') {
+        // Use standard ref for empty: ''
+        const standardRef = (ref === 'empty' || ref === '~') ? '' : ref;
+        return api.toGitUri(uri, standardRef);
+      }
+    }
+  } catch (e) {
+    console.error('Error getting git uri:', e);
+  }
+  // Fallback if git api fails
+  return uri.with({
+    scheme: 'git',
+    query: JSON.stringify({ path: uri.fsPath, ref: (ref === 'empty' || ref === '~') ? '' : ref })
+  });
+}
+
+interface InFlightEntry {
+  promise: Promise<string>;
+  signals: Set<AbortSignal>;
+  controller: AbortController;
+}
+
+const inFlightEntries = new Map<string, InFlightEntry>();
+const gitCache = new Map<string, { value: string; timestamp: number }>();
+
+export function clearGitCache() {
+  gitCache.clear();
+}
+
 export async function execGit(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
+  const cacheKey = cwd + '::' + args.join(' ');
+  
+  // Check cache first
+  if (gitCache.has(cacheKey)) {
+    return gitCache.get(cacheKey)!.value;
+  }
+  
+  if (signal?.aborted) {
+    throw new Error('ABORTED');
+  }
+  
+  let entry = inFlightEntries.get(cacheKey);
+  
+  if (!entry) {
+    const controller = new AbortController();
+    const promise = execGitInternal(args, cwd, controller.signal);
+    entry = {
+      promise,
+      signals: new Set<AbortSignal>(),
+      controller
+    };
+    inFlightEntries.set(cacheKey, entry);
+    
+    promise.then(result => {
+      gitCache.set(cacheKey, { value: result, timestamp: Date.now() });
+    }).catch(() => {
+      // Don't cache errors
+    }).finally(() => {
+      inFlightEntries.delete(cacheKey);
+    });
+  }
+  
+  if (signal) {
+    entry.signals.add(signal);
+  }
+  
+  const currentEntry = entry; // capture local reference
+  
+  return new Promise<string>((resolve, reject) => {
+    const onAbort = () => {
+      if (signal) {
+        currentEntry.signals.delete(signal);
+        // If no other signals are waiting, abort the child process
+        if (currentEntry.signals.size === 0) {
+          currentEntry.controller.abort();
+        }
+      }
+      reject(new Error('ABORTED'));
+    };
+    
+    if (signal?.aborted) {
+      return onAbort();
+    }
+    
+    if (signal) {
+      signal.addEventListener('abort', onAbort);
+    }
+    
+    currentEntry.promise.then(
+      res => {
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+          currentEntry.signals.delete(signal);
+        }
+        resolve(res);
+      },
+      err => {
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+          currentEntry.signals.delete(signal);
+        }
+        if (err.message === 'ABORTED' || err.name === 'AbortError') {
+          reject(new Error('ABORTED'));
+        } else {
+          reject(err);
+        }
+      }
+    );
+  });
+}
+
+async function execGitInternal(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
   const git = await getGitPath();
   const fullArgs = ['-c', 'core.quotepath=false', ...args];
   return new Promise((resolve, reject) => {
@@ -115,6 +234,7 @@ export async function execGit(args: string[], cwd: string, signal?: AbortSignal)
     });
   });
 }
+
 
 export async function execGitBuffer(args: string[], cwd: string, signal?: AbortSignal): Promise<Uint8Array> {
   const git = await getGitPath();
@@ -501,6 +621,11 @@ export async function traceLineHistory(
         // Track when we enter the diff section (skip diff metadata headers)
         if (line.startsWith('diff --git')) {
           seenDiffHeader = true;
+          const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+          if (match) {
+            currentCommit.oldFilePath = match[1];
+            currentCommit.newFilePath = match[2];
+          }
           continue;
         }
         if (line.startsWith('@@ ')) {

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { GitGraphProvider } from './panel/gitGraphProvider';
-import { execGit, traceLineHistory, hasLocalModifications } from './gitHelper';
+import { execGit, traceLineHistory, hasLocalModifications, clearGitCache } from './gitHelper';
 import { BlameAnnotationsManager } from './blameAnnotations';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -14,6 +14,13 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
   context.subscriptions.push(docProvider);
+
+  // Clear git cache when text documents are saved
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument(() => {
+      clearGitCache();
+    })
+  );
 
   // Helper to get active workspace folder CWD
   const getCwd = () => {
@@ -107,7 +114,9 @@ export function activate(context: vscode.ExtensionContext) {
           author: c.author,
           timestamp: c.timestamp,
           message: c.message,
-          lineRange: c.lineRange
+          lineRange: c.lineRange,
+          oldFilePath: c.oldFilePath,
+          newFilePath: c.newFilePath
         }));
 
         if (hasLocalChanges) {

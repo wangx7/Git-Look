@@ -2085,21 +2085,23 @@ svg#graph-svg .merge-inner.hovered {
 
 .rose-chart-tooltip {
   position: absolute;
-  background-color: var(--surface-2, var(--vscode-editorHoverWidget-background));
+  background-color: var(--vscode-editorHoverWidget-background);
+  /* Enhance glassmorphism effect */
+  background: rgba(var(--vscode-editorHoverWidget-background-rgb, 30, 30, 30), 0.85);
   border: 1px solid var(--vscode-editorHoverWidget-border);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 12px;
+  padding: 12px 14px;
   font-size: 12px;
   color: var(--vscode-editorHoverWidget-foreground);
   pointer-events: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
   z-index: 1000;
-  transition: opacity 0.2s ease, transform 0.1s ease-out;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  min-width: 180px;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+  min-width: 220px;
   transform: translate(-50%, -100%);
-  margin-top: -8px;
+  margin-top: -12px;
 }
 
 .file-blame-list {

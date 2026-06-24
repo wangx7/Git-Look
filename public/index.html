@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Git Visualizer Preview</title>
+    <style>
+        body {
+            background-color: #1e1e1e;
+            color: #cccccc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "HelveticaNeue-Light", "Ubuntu", "Droid Sans", sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+        #app { height: 100%; width: 100%; display: flex; flex-direction: column; }
+    </style>
+    <link rel="stylesheet" href="../media/panel.css">
+    <link rel="stylesheet" href="../media/codicon.css">
+    <script>
+        window.vscode = {
+            postMessage: (msg) => console.log('VSCode Message Posted:', msg),
+            getState: () => ({}),
+            setState: () => {}
+        };
+        window.acquireVsCodeApi = () => window.vscode;
+    </script>
+    <script src="mockData.js"></script>
+</head>
+<body>
+    <div id="app"></div>
+    <script>
+        fetch('../media/panel.html')
+            .then(res => res.text())
+            .then(html => {
+                document.getElementById('app').innerHTML = html;
+                
+                const script = document.createElement('script');
+                script.src = '../dist/webview.js';
+                script.onload = () => {
+                    // Send mock data to webview
+                    setTimeout(() => {
+                        window.postMessage(window.mockData, '*');
+                    }, 500);
+                };
+                document.body.appendChild(script);
+            });
+    </script>
+</body>
+</html>

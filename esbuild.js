@@ -4,7 +4,7 @@ const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
 async function main() {
-  const ctx = await esbuild.context({
+  const ctxExtension = await esbuild.context({
     entryPoints: ['src/extension.ts'],
     bundle: true,
     format: 'cjs',
@@ -16,12 +16,25 @@ async function main() {
     external: ['vscode'],
     logLevel: 'info',
   });
+
+  const ctxWebview = await esbuild.context({
+    entryPoints: ['src/webview/main.ts'],
+    bundle: true,
+    format: 'iife',
+    minify: production,
+    sourcemap: !production,
+    sourcesContent: false,
+    platform: 'browser',
+    outfile: 'media/panel.js',
+    logLevel: 'info',
+  });
+
   if (watch) {
-    await ctx.watch();
+    await Promise.all([ctxExtension.watch(), ctxWebview.watch()]);
     console.log('Watching for changes...');
   } else {
-    await ctx.rebuild();
-    await ctx.dispose();
+    await Promise.all([ctxExtension.rebuild(), ctxWebview.rebuild()]);
+    await Promise.all([ctxExtension.dispose(), ctxWebview.dispose()]);
   }
 }
 

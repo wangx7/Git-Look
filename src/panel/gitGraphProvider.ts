@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats } from '../gitHelper';
+import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri } from '../gitHelper';
 
 export class GitGraphProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'git-visual.graphView';
@@ -85,6 +85,10 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         }
         case 'loadData': {
           this._setupGitWatcher(gitRoot);
+          const page = typeof data.page === 'number' ? data.page : 0;
+          if (page === 0) {
+            clearGitCache();
+          }
           if (this._abortController) {
             this._abortController.abort();
           }
@@ -92,7 +96,6 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           const signal = this._abortController.signal;
 
           try {
-            const page = typeof data.page === 'number' ? data.page : 0;
             const pageSize = 150;
             const skip = page * pageSize;
 
@@ -274,108 +277,117 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             // Ignore and fall back to default
           }
 
-          // Use absolute file path with the built-in git scheme so VSCode can correctly
-          // render binary files (images, etc.) via the vscode.git extension.
           const absoluteFilePath = path.join(gitRoot, file);
-          const leftUri = (!parentHash || parentHash === 'empty') ?
-            vscode.Uri.from({
-              scheme: 'git',
-              path: absoluteFilePath,
-              query: JSON.stringify({ path: absoluteFilePath, ref: '~' })
-            }) :
-            vscode.Uri.from({
-              scheme: 'git',
-              path: absoluteFilePath,
-              query: JSON.stringify({ path: absoluteFilePath, ref: parentHash })
-            });
-          const rightUri = vscode.Uri.from({
-            scheme: 'git',
-            path: absoluteFilePath,
-            query: JSON.stringify({ path: absoluteFilePath, ref: hash })
-          });
+          const fileUri = vscode.Uri.file(absoluteFilePath);
+          const relativeFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
+
+          let rightUri: vscode.Uri;
+          try {
+            await execGit(['cat-file', '-e', `${hash}:${relativeFilePath}`], gitRoot);
+            rightUri = await toGitUri(fileUri, hash);
+          } catch (e) {
+            rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+          }
+
+          let leftUri: vscode.Uri;
+          if (!parentHash || parentHash === 'empty') {
+            leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+          } else {
+            try {
+              await execGit(['cat-file', '-e', `${parentHash}:${relativeFilePath}`], gitRoot);
+              leftUri = await toGitUri(fileUri, parentHash);
+            } catch (e) {
+              leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+            }
+          }
+
           const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
 
           await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+
           break;
         }
         case 'openSingleDiff': {
-          const { file, hash, lineRange } = data;
+          const { file, hash, lineRange, oldFilePath, newFilePath } = data;
           let parentHash = data.parentHash;
 
-          try {
-            const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], gitRoot)).trim();
-            const parents = parentsStr ? parentsStr.split(/\s+/) : [];
-            if (parents.length > 0) {
-              let existsInCurrent = false;
-              try {
-                await execGit(['cat-file', '-e', `${hash}:${file}`], gitRoot);
-                existsInCurrent = true;
-              } catch (e) {}
-
-              if (existsInCurrent) {
-                let existsInPrimaryParent = false;
-                try {
-                  await execGit(['cat-file', '-e', `${parents[0]}:${file}`], gitRoot);
-                  existsInPrimaryParent = true;
-                } catch (e) {}
-
-                if (existsInPrimaryParent) {
-                  parentHash = parents[0];
-                } else {
-                  parentHash = 'empty';
-                }
-              } else {
-                let foundParent = '';
-                for (const parent of parents) {
-                  try {
-                    await execGit(['cat-file', '-e', `${parent}:${file}`], gitRoot);
-                    foundParent = parent;
-                    break;
-                  } catch (e) {}
-                }
-                parentHash = foundParent || 'empty';
-              }
-            }
-          } catch (e) {}
-
           const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
-          const leftUri = (!parentHash || parentHash === 'empty') ?
-            vscode.Uri.from({
-              scheme: 'git',
-              path: absoluteFilePath,
-              query: JSON.stringify({ path: absoluteFilePath, ref: '~' })
-            }) :
-            vscode.Uri.from({
-              scheme: 'git',
-              path: absoluteFilePath,
-              query: JSON.stringify({ path: absoluteFilePath, ref: parentHash })
-            });
 
-          const rightUri = vscode.Uri.from({
-            scheme: 'git',
-            path: absoluteFilePath,
-            query: JSON.stringify({ path: absoluteFilePath, ref: hash })
-          });
-          const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
+          let rightUri: vscode.Uri;
+          let leftUri: vscode.Uri;
 
-          await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
-
-          if (lineRange) {
-            const targetLine = lineRange.newStart;
-            const targetRange = new vscode.Range(
-              new vscode.Position(Math.max(0, targetLine - 2), 0),
-              new vscode.Position(targetLine + (lineRange.newLength || 1) - 1, 0)
-            );
-            let revealed = false;
-            for (let attempt = 0; attempt < 6 && !revealed; attempt++) {
-              await new Promise(r => setTimeout(r, 200 + attempt * 150));
-              const activeEditor = vscode.window.activeTextEditor;
-              if (activeEditor) {
-                activeEditor.revealRange(targetRange, vscode.TextEditorRevealType.InCenter);
-                revealed = true;
-              }
+          // If we have exact historic paths from git log -L parsing, use them directly!
+          // This is highly optimized and perfectly handles file renames.
+          if (newFilePath) {
+            try {
+              await execGit(['cat-file', '-e', `${hash}:${newFilePath}`], gitRoot);
+              const newAbsPath = path.join(gitRoot, newFilePath);
+              rightUri = await toGitUri(vscode.Uri.file(newAbsPath), hash);
+            } catch (e) {
+              rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+            }
+          } else {
+            // Fallback to current relative path if historic paths are missing
+            const relativeFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
+            try {
+              await execGit(['cat-file', '-e', `${hash}:${relativeFilePath}`], gitRoot);
+              rightUri = await toGitUri(vscode.Uri.file(absoluteFilePath), hash);
+            } catch (e) {
+              rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
             }
           }
+
+          let resolvedParentHash = parentHash;
+          if (parentHash && parentHash !== 'empty') {
+            if (oldFilePath) {
+              try {
+                await execGit(['cat-file', '-e', `${parentHash}:${oldFilePath}`], gitRoot);
+              } catch (e) {
+                resolvedParentHash = 'empty';
+              }
+            } else {
+               const relativeFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
+               try {
+                 await execGit(['cat-file', '-e', `${parentHash}:${relativeFilePath}`], gitRoot);
+               } catch (e) {
+                 resolvedParentHash = 'empty';
+                 try {
+                   const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], gitRoot)).trim();
+                   const parents = parentsStr ? parentsStr.split(/\s+/) : [];
+                   for (const p of parents) {
+                     try {
+                       await execGit(['cat-file', '-e', `${p}:${relativeFilePath}`], gitRoot);
+                       resolvedParentHash = p;
+                       break;
+                     } catch (err) {}
+                   }
+                 } catch (err) {}
+               }
+            }
+          }
+
+          if (!resolvedParentHash || resolvedParentHash === 'empty') {
+            leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+          } else {
+            if (oldFilePath) {
+              const oldAbsPath = path.join(gitRoot, oldFilePath);
+              leftUri = await toGitUri(vscode.Uri.file(oldAbsPath), resolvedParentHash);
+            } else {
+              leftUri = await toGitUri(vscode.Uri.file(absoluteFilePath), resolvedParentHash);
+            }
+          }
+
+          const title = `${path.basename(file)} (${(resolvedParentHash && resolvedParentHash !== 'empty') ? resolvedParentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
+
+          let options: vscode.TextDocumentShowOptions = {};
+          if (lineRange) {
+            const startLine = Math.max(0, lineRange.newStart - 1);
+            const endLine = Math.max(0, startLine + Math.max(0, lineRange.newLength - 1));
+            options.selection = new vscode.Range(startLine, 0, endLine, 0);
+          }
+
+          await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title, options);
+
           break;
         }
         case 'openWorkspaceFile': {
@@ -420,21 +432,26 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         case 'openAllDiffs': {
           try {
             const { hash, files, parentHash, message } = data;
-            const resourceList = files.map((f: any) => {
-              // Use absolute file path with the built-in git scheme so binary files (images) render correctly.
+            const resourceList = await Promise.all(files.map(async (f: any) => {
               const absoluteFilePath = path.join(gitRoot, f.path);
-              const leftUri = vscode.Uri.from({
-                scheme: 'git',
-                path: absoluteFilePath,
-                query: JSON.stringify({ path: absoluteFilePath, ref: parentHash === 'empty' ? '~' : parentHash })
-              });
-              const rightUri = vscode.Uri.from({
-                scheme: 'git',
-                path: absoluteFilePath,
-                query: JSON.stringify({ path: absoluteFilePath, ref: hash })
-              });
+              const fileUri = vscode.Uri.file(absoluteFilePath);
+              
+              let leftUri: vscode.Uri;
+              if (f.status === 'A' || !parentHash || parentHash === 'empty') {
+                leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+              } else {
+                leftUri = await toGitUri(fileUri, parentHash);
+              }
+
+              let rightUri: vscode.Uri;
+              if (f.status === 'D') {
+                rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+              } else {
+                rightUri = await toGitUri(fileUri, hash);
+              }
+
               return [rightUri, leftUri, rightUri];
-            });
+            }));
             const title = `${hash.substring(0, 7)} - ${message || ''} (${files.length} 个文件)`;
             console.log(`[Git 可视化] openAllDiffs: opening ${resourceList.length} changes with title "${title}"`);
             await vscode.commands.executeCommand('vscode.changes', title, resourceList);
@@ -575,6 +592,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     }
     this._debounceTimer = setTimeout(() => {
       console.log('[Git 可视化] Git change detected, refreshing graph...');
+      clearGitCache();
       this.refresh();
     }, 300);
   }
