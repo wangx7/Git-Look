@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { GitGraphProvider } from './panel/gitGraphProvider';
-import { execGit, traceLineHistory, hasLocalModifications, clearGitCache } from './gitHelper';
+import { execGit, traceLineHistory, hasLocalModifications, clearGitCache, traceFileHistory, hasFileLocalModifications } from './gitHelper';
 import { BlameAnnotationsManager } from './blameAnnotations';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -132,9 +132,13 @@ export function activate(context: vscode.ExtensionContext) {
               oldLength: endLine - startLine + 1,
               newStart: startLine,
               newLength: endLine - startLine + 1
-            }
+            },
+            oldFilePath: repoFilePath,
+            newFilePath: repoFilePath
           });
         }
+
+        await vscode.commands.executeCommand('git-visual.graphView.focus');
 
         gitGraphProvider.showSelectionHistory({
           filePath: repoFilePath,
@@ -149,6 +153,96 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(traceCommand);
+
+  // Register File History context command (Git 文件历史)
+  const traceFileHistoryCommand = vscode.commands.registerCommand('git-visual.traceFileHistory', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage('请在编辑器中打开一个代码文件以查看文件历史！');
+      return;
+    }
+
+    const document = editor.document;
+    if (document.isUntitled) {
+      vscode.window.showWarningMessage('无法查看未保存文件的文件历史！');
+      return;
+    }
+
+    const cwd = getCwd();
+    if (!cwd) {
+      vscode.window.showWarningMessage('未找到工作区，请先打开一个 Git 项目文件夹！');
+      return;
+    }
+
+    let filePath = document.uri.fsPath;
+    let startRef: string | undefined = undefined;
+
+    if (document.uri.scheme === 'git') {
+      try {
+        const queryObj = JSON.parse(document.uri.query);
+        if (queryObj.ref) {
+          startRef = queryObj.ref;
+        }
+        if (queryObj.path) {
+          filePath = queryObj.path;
+        }
+      } catch (e) {
+        // Ignore
+      }
+    }
+
+    try {
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: "正在获取 Git 文件历史...",
+        cancellable: false
+      }, async () => {
+        const commits = await traceFileHistory(cwd, filePath, startRef);
+        
+        let repoRoot = cwd;
+        try {
+          repoRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+        } catch (e) {}
+        const repoFilePath = path.relative(repoRoot, filePath).replace(/\\/g, '/');
+
+        const hasLocalChanges = !startRef && (await hasFileLocalModifications(cwd, filePath));
+
+        const commitsToSend = commits.map(c => ({
+          hash: c.hash,
+          parentHash: c.parentHash,
+          author: c.author,
+          timestamp: c.timestamp,
+          message: c.message,
+          oldFilePath: c.oldFilePath,
+          newFilePath: c.newFilePath
+        }));
+
+        if (hasLocalChanges) {
+          const latestRef = commits[0]?.hash ?? 'HEAD';
+          commitsToSend.unshift({
+            hash: 'HEAD',
+            parentHash: latestRef,
+            author: '工作区未提交更改',
+            timestamp: Math.floor(Date.now() / 1000),
+            message: '未提交的修改',
+            oldFilePath: repoFilePath,
+            newFilePath: repoFilePath
+          });
+        }
+
+        await vscode.commands.executeCommand('git-visual.graphView.focus');
+
+        gitGraphProvider.showFileHistory({
+          filePath: repoFilePath,
+          commits: commitsToSend
+        });
+      });
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`获取文件历史失败: ${err.message}`);
+    }
+  });
+
+  context.subscriptions.push(traceFileHistoryCommand);
 
   // 3.5 Register Toggle Blame Annotations command (Git 行作者)
   const blameAnnotationsManager = new BlameAnnotationsManager(getCwd, gitGraphProvider);

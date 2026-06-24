@@ -62,6 +62,7 @@ export const RightPaneState = {
   COMMIT: 'commit', 
   AUTHOR: 'author', 
   HISTORY: 'history', 
+  FILE_HISTORY: 'file_history',
   FILE_BLAME_STATS: 'file_blame_stats', 
   LOADING: 'loading' 
 } as const;

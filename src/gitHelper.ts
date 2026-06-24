@@ -881,3 +881,113 @@ export async function getCodeStats(
     throw e;
   }
 }
+
+export async function hasFileLocalModifications(
+  cwd: string,
+  filePath: string
+): Promise<boolean> {
+  try {
+    let gitRoot = cwd;
+    try {
+      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+    } catch (e) {
+      // Ignore
+    }
+    const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
+    const diffOutput = await execGit(['diff', 'HEAD', '--', repoFilePath], gitRoot);
+    return diffOutput.trim().length > 0;
+  } catch (e) {
+    console.error('Error checking file local modifications:', e);
+    return false;
+  }
+}
+
+export async function traceFileHistory(
+  cwd: string,
+  filePath: string,
+  startRef?: string,
+  signal?: AbortSignal
+): Promise<CommitDiff[]> {
+  let gitRoot = cwd;
+  try {
+    gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+  } catch (e) {
+    // Ignore
+  }
+
+  const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
+
+  const args = [
+    'log',
+    '--follow',
+    '--name-status',
+    '--date=raw',
+    '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s'
+  ];
+  if (startRef) {
+    args.push(startRef);
+  }
+  args.push('--', repoFilePath);
+
+  try {
+    const output = await execGit(args, gitRoot, signal);
+    const lines = output.split('\n');
+    const commits: CommitDiff[] = [];
+    let currentCommit: CommitDiff | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('COMMIT_START_LOOK\x1f')) {
+        if (currentCommit) {
+          commits.push(currentCommit);
+        }
+        const parts = line.substring('COMMIT_START_LOOK\x1f'.length).split('\x1f');
+        const hash = parts[0];
+        const parentsStr = parts[1] || '';
+        const author = parts[2];
+        const email = parts[3];
+        const timestamp = parseInt(parts[4], 10);
+        const message = parts.slice(5).join('\x1f');
+
+        const parents = parentsStr.split(' ').filter(p => p.trim().length > 0);
+        const parentHash = parents[0] || 'empty';
+
+        currentCommit = {
+          hash,
+          parentHash,
+          parents,
+          author,
+          email,
+          timestamp,
+          message,
+          diffLines: [],
+          oldFilePath: repoFilePath,
+          newFilePath: repoFilePath
+        };
+      } else if (currentCommit && line) {
+        // Parse the status line
+        // Typically it is "M\tfilepath" or "R100\toldpath\tnewpath" or "A\tfilepath"
+        const parts = line.split('\t');
+        if (parts.length >= 2) {
+          const status = parts[0];
+          if (status.startsWith('R')) {
+            // Rename: R100 \t oldpath \t newpath
+            currentCommit.oldFilePath = parts[1];
+            currentCommit.newFilePath = parts[2];
+          } else {
+            currentCommit.oldFilePath = parts[1];
+            currentCommit.newFilePath = parts[1];
+          }
+        }
+      }
+    }
+
+    if (currentCommit) {
+      commits.push(currentCommit);
+    }
+    return commits;
+  } catch (err) {
+    console.error('Error tracing file history:', err);
+    return [];
+  }
+}

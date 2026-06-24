@@ -1,256 +1,263 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource}; font-src ${cspSource};">
-  <link rel="stylesheet" href="${codiconUri}">
-  <link rel="stylesheet" href="${styleUri}">
-  <title>Git Graph</title>
-</head>
-<body>
-  <div class="container">
-    <!-- 主展示区 (Flex Split Layout) -->
-    <div class="main-layout">
-      <!-- Loading Overlay -->
-      <div id="loading" class="loading-overlay hidden">
-        <div class="spinner"></div>
-      </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource}; font-src ${cspSource};"
+    />
+    <link rel="stylesheet" href="${codiconUri}" />
+    <link rel="stylesheet" href="${styleUri}" />
+    <title>Git Graph</title>
+  </head>
+  <body>
+    <div class="container">
+      <!-- 主展示区 (Flex Split Layout) -->
+      <div class="main-layout">
+        <!-- Loading Overlay -->
+        <div id="loading" class="loading-overlay hidden">
+          <div class="spinner"></div>
+        </div>
 
-      <!-- Left Column: Filter + Stats Strip + List -->
-      <div class="left-pane">
-        <!-- 过滤工具栏 -->
-        <div class="filter-bar">
-          <div class="filter-group">
-            <label for="branch-select"><i class="codicon codicon-git-branch"></i></label>
-            <select id="branch-select">
-              <option value="">分支</option>
-            </select>
+        <!-- Left Column: Filter + Stats Strip + List -->
+        <div class="left-pane">
+          <!-- 过滤工具栏 -->
+          <div class="filter-bar">
+            <div class="filter-group">
+              <label for="branch-select"><i class="codicon codicon-git-branch"></i></label>
+              <select id="branch-select">
+                <option value="">分支</option>
+              </select>
+            </div>
+
+            <div class="filter-group">
+              <label for="author-select"><i class="codicon codicon-person"></i></label>
+              <select id="author-select">
+                <option value="">作者</option>
+              </select>
+            </div>
+
+            <div class="filter-group date-preset-group">
+              <label for="date-preset-select"><i class="codicon codicon-calendar"></i></label>
+              <select id="date-preset-select">
+                <option value="">时间</option>
+                <option value="24h">过去24小时</option>
+                <option value="7d">过去7天</option>
+                <option value="30d">过去30天</option>
+                <option value="custom">自定义...</option>
+              </select>
+            </div>
+
+            <div class="filter-group date-range-group hidden">
+              <input type="date" id="since-date" title="起始日期" />
+              <span class="date-separator">~</span>
+              <input type="date" id="until-date" title="截止日期" />
+            </div>
+
+            <div class="filter-group search-group">
+              <label for="search-input"><i class="codicon codicon-search"></i></label>
+              <input type="text" id="search-input" placeholder="搜索消息或哈希" />
+            </div>
+
+            <button id="reset-btn" title="重置所有过滤条件">
+              <i class="codicon codicon-clear-all"></i>
+              <span>重置</span>
+            </button>
           </div>
 
-          <div class="filter-group">
-            <label for="author-select"><i class="codicon codicon-person"></i></label>
-            <select id="author-select">
-              <option value="">作者</option>
-            </select>
-          </div>
+          <!-- 错误提示 -->
+          <div id="error-message" class="error-banner hidden"></div>
 
-          <div class="filter-group date-preset-group">
-            <label for="date-preset-select"><i class="codicon codicon-calendar"></i></label>
-            <select id="date-preset-select">
-              <option value="">时间</option>
-              <option value="24h">过去24小时</option>
-              <option value="7d">过去7天</option>
-              <option value="30d">过去30天</option>
-              <option value="custom">自定义...</option>
-            </select>
+          <!-- Left Pane: Commit History List -->
+          <div class="list-pane">
+            <div class="canvas-wrapper">
+              <svg id="graph-svg"></svg>
+              <table id="commits-table">
+                <tbody id="commits-tbody">
+                  <!-- 提交行将动态插入此处 -->
+                </tbody>
+              </table>
+            </div>
           </div>
+        </div>
 
-          <div class="filter-group date-range-group hidden">
-            <input type="date" id="since-date" title="起始日期">
-            <span class="date-separator">~</span>
-            <input type="date" id="until-date" title="截止日期">
-          </div>
+        <!-- Resizer handle -->
+        <div id="resizer-bar" class="resizer-bar"></div>
 
-          <div class="filter-group search-group">
-            <label for="search-input"><i class="codicon codicon-search"></i></label>
-            <input type="text" id="search-input" placeholder="搜索消息或哈希">
-          </div>
+        <!-- Overlay backdrop (shown in narrow/overlay mode) -->
+        <div id="overlay-backdrop" class="overlay-backdrop"></div>
 
-          <button id="reset-btn" title="重置所有过滤条件">
-            <i class="codicon codicon-clear-all"></i>
-            <span>重置</span>
+        <!-- Right Pane: Three States -->
+        <div class="details-pane" id="details-pane">
+          <!-- Close button -->
+          <button class="details-close-btn" id="details-close-btn" title="折叠详情面板">
+            <i class="codicon codicon-close"></i>
           </button>
-        </div>
 
-
-
-        <!-- 错误提示 -->
-        <div id="error-message" class="error-banner hidden"></div>
-
-        <!-- Left Pane: Commit History List -->
-        <div class="list-pane">
-          <div class="canvas-wrapper">
-            <svg id="graph-svg"></svg>
-            <table id="commits-table">
-              <tbody id="commits-tbody">
-                <!-- 提交行将动态插入此处 -->
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Resizer handle -->
-      <div id="resizer-bar" class="resizer-bar"></div>
-
-      <!-- Overlay backdrop (shown in narrow/overlay mode) -->
-      <div id="overlay-backdrop" class="overlay-backdrop"></div>
-
-      <!-- Right Pane: Three States -->
-      <div class="details-pane" id="details-pane">
-        <!-- Close button -->
-        <button class="details-close-btn" id="details-close-btn" title="折叠详情面板">
-          <i class="codicon codicon-close"></i>
-        </button>
-
-        <!-- ── State 0: Overview Stats (default when nothing selected) ── -->
-        <div id="overview-stats" class="overview-stats hidden">
-          <div class="overview-header">
-            <span class="overview-title"><i class="codicon codicon-graph"></i> 代码统计</span>
-            <span class="overview-range" id="overview-range">近100天</span>
-          </div>
-
-          <!-- Summary Cards -->
-          <div class="stat-cards">
-            <div class="stat-card">
-              <div class="stat-card-value" id="ov-commits">—</div>
-              <div class="stat-card-label">提交数</div>
+          <!-- ── State 0: Overview Stats (default when nothing selected) ── -->
+          <div id="overview-stats" class="overview-stats hidden">
+            <div class="overview-header">
+              <span class="overview-title"><i class="codicon codicon-graph"></i> 代码统计</span>
+              <span class="overview-range" id="overview-range">近100天</span>
             </div>
-            <div class="stat-card stat-card-add">
-              <div class="stat-card-value" id="ov-add">—</div>
-              <div class="stat-card-label">新增行</div>
-            </div>
-            <div class="stat-card stat-card-del">
-              <div class="stat-card-value" id="ov-del">—</div>
-              <div class="stat-card-label">删除行</div>
-            </div>
-          </div>
 
-          <!-- Activity Chart -->
-          <div class="stats-section">
-            <div class="stats-section-title">提交活跃度</div>
-            <div class="activity-chart-wrap">
-              <svg id="activity-svg" class="activity-svg"></svg>
-            </div>
-          </div>
-
-          <!-- Contributors Leaderboard -->
-          <div class="stats-section">
-            <div class="stats-section-title">贡献者排行 <span class="stats-section-hint">点击查看详情</span></div>
-            <div id="contributors-list" class="contributors-list"></div>
-          </div>
-
-          <!-- Top Files -->
-          <div class="stats-section">
-            <div class="stats-section-title">高频修改文件</div>
-            <div id="top-files-list" class="top-files-list"></div>
-          </div>
-        </div>
-
-        <!-- ── State 1: Commit Detail (existing, kept intact) ── -->
-        <div class="details-placeholder" id="details-placeholder">
-          <i class="codicon codicon-graph"></i>
-          <span>加载统计中…</span>
-        </div>
-        <div class="details-content hidden" id="details-content">
-          <div class="details-header-section">
-            <div class="details-meta-row">
-              <span class="detail-author-info-compact">
-                <span class="avatar-circle" id="detail-author-avatar"></span>
-                <span class="detail-author-text">
-                  <span id="detail-author-name" class="detail-author-name"></span>
-                  <span id="detail-author-date" class="detail-author-date"></span>
-                </span>
-              </span>
-              <div class="details-hash-group">
-                <span id="detail-hash-badge" class="detail-hash-copyable" title="点击复制哈希"></span>
-                <span id="detail-merge-badge" class="ref-badge badge-merge hidden">合并</span>
+            <!-- Summary Cards -->
+            <div class="stat-cards">
+              <div class="stat-card">
+                <div class="stat-card-value" id="ov-commits">—</div>
+                <div class="stat-card-label">提交数</div>
+              </div>
+              <div class="stat-card stat-card-add">
+                <div class="stat-card-value" id="ov-add">—</div>
+                <div class="stat-card-label">新增行</div>
+              </div>
+              <div class="stat-card stat-card-del">
+                <div class="stat-card-value" id="ov-del">—</div>
+                <div class="stat-card-label">删除行</div>
               </div>
             </div>
 
-            <div id="detail-branches-container" class="detail-branches-container hidden"></div>
-
-            <div class="details-message-container">
-              <div id="detail-msg-subject" class="detail-msg-subject"></div>
-              <div id="detail-msg-body" class="detail-msg-body hidden"></div>
+            <!-- Activity Chart -->
+            <div class="stats-section">
+              <div class="stats-section-title">提交活跃度</div>
+              <div class="activity-chart-wrap">
+                <svg id="activity-svg" class="activity-svg"></svg>
+              </div>
             </div>
 
-            <div class="details-stats-row" id="detail-stats-row">
-              <!-- Stats will be populated here -->
+            <!-- Contributors Leaderboard -->
+            <div class="stats-section">
+              <div class="stats-section-title">贡献者排行 <span class="stats-section-hint">点击查看详情</span></div>
+              <div id="contributors-list" class="contributors-list"></div>
+            </div>
+
+            <!-- Top Files -->
+            <div class="stats-section">
+              <div class="stats-section-title">高频修改文件</div>
+              <div id="top-files-list" class="top-files-list"></div>
             </div>
           </div>
-          <div class="details-files-section">
-            <div id="detail-files-tree" class="file-list">
-              <!-- 文件树 -->
+
+          <!-- ── State 1: Commit Detail (existing, kept intact) ── -->
+          <div class="details-placeholder" id="details-placeholder">
+            <i class="codicon codicon-graph"></i>
+            <span>加载统计中…</span>
+          </div>
+          <div class="details-content hidden" id="details-content">
+            <div class="details-header-section">
+              <div class="details-meta-row">
+                <span class="detail-author-info-compact">
+                  <span class="avatar-circle" id="detail-author-avatar"></span>
+                  <span class="detail-author-text">
+                    <span id="detail-author-name" class="detail-author-name"></span>
+                    <span id="detail-author-date" class="detail-author-date"></span>
+                  </span>
+                </span>
+                <div class="details-hash-group">
+                  <span id="detail-hash-badge" class="detail-hash-copyable" title="点击复制哈希"></span>
+                  <span id="detail-merge-badge" class="ref-badge badge-merge hidden">合并</span>
+                </div>
+              </div>
+
+              <div id="detail-branches-container" class="detail-branches-container hidden"></div>
+
+              <div class="details-message-container">
+                <div id="detail-msg-subject" class="detail-msg-subject"></div>
+                <div id="detail-msg-body" class="detail-msg-body hidden"></div>
+              </div>
+
+              <div class="details-stats-row" id="detail-stats-row">
+                <!-- Stats will be populated here -->
+              </div>
+            </div>
+            <div class="details-files-section">
+              <div id="detail-files-tree" class="file-list">
+                <!-- 文件树 -->
+              </div>
+            </div>
+          </div>
+
+          <!-- ── State 2: Author Detail ── -->
+          <div id="author-stats" class="author-stats hidden">
+            <div class="author-stats-header">
+              <span class="selection-history-title"><i class="codicon codicon-person"></i> 作者详情</span>
+            </div>
+            <div class="author-profile">
+              <span class="avatar-circle author-stats-avatar" id="author-stats-avatar"></span>
+              <div class="author-profile-info">
+                <div class="author-profile-name" id="author-stats-name"></div>
+                <div class="author-profile-email" id="author-stats-email"></div>
+              </div>
+            </div>
+
+            <!-- Author Summary Cards -->
+            <div class="stat-cards">
+              <div class="stat-card">
+                <div class="stat-card-value" id="au-commits">—</div>
+                <div class="stat-card-label">提交数</div>
+              </div>
+              <div class="stat-card stat-card-add">
+                <div class="stat-card-value" id="au-add">—</div>
+                <div class="stat-card-label">新增行</div>
+              </div>
+              <div class="stat-card stat-card-del">
+                <div class="stat-card-value" id="au-del">—</div>
+                <div class="stat-card-label">删除行</div>
+              </div>
+            </div>
+
+            <!-- Weekday Distribution -->
+            <div class="stats-section">
+              <div class="stats-section-title">活跃时段（按星期）</div>
+              <div id="weekday-chart" class="weekday-chart"></div>
+            </div>
+
+            <!-- Author Top Files -->
+            <div class="stats-section">
+              <div class="stats-section-title">最常修改文件</div>
+              <div id="author-top-files" class="top-files-list"></div>
+            </div>
+
+            <!-- Highlight in graph -->
+            <div class="author-actions">
+              <button class="author-highlight-btn" id="author-highlight-btn"><i class="codicon codicon-eye"></i> 在图谱中高亮此作者</button>
+            </div>
+          </div>
+
+          <!-- ── State 3: Selection History ── -->
+          <div id="selection-history" class="selection-history hidden">
+            <div class="selection-history-header">
+              <span class="selection-history-title"><i class="codicon codicon-history"></i> 选区历史</span>
+            </div>
+            <div class="selection-file-info" id="history-file-info"></div>
+            <div class="history-list" id="history-list"></div>
+          </div>
+
+          <!-- ── State 5: File History ── -->
+          <div id="file-history" class="selection-history hidden">
+            <div class="selection-history-header">
+              <span class="selection-history-title"><i class="codicon codicon-history"></i> 文件历史</span>
+            </div>
+            <div class="selection-file-info" id="file-history-info"></div>
+            <div class="history-list" id="file-history-list"></div>
+          </div>
+
+          <div id="file-blame-stats" class="file-blame-stats hidden">
+            <div class="file-blame-header">
+              <span class="file-blame-title"><i class="codicon codicon-pie-chart"></i> 文件行作者</span>
+            </div>
+
+            <div class="rose-chart-container">
+              <svg id="rose-chart-svg" class="rose-chart-svg" viewBox="-100 -100 200 200"></svg>
+              <div id="rose-chart-tooltip" class="rose-chart-tooltip hidden"></div>
             </div>
           </div>
         </div>
-
-        <!-- ── State 2: Author Detail ── -->
-        <div id="author-stats" class="author-stats hidden">
-          <div class="author-stats-header">
-            <span class="selection-history-title"><i class="codicon codicon-person"></i> 作者详情</span>
-          </div>
-          <div class="author-profile">
-            <span class="avatar-circle author-stats-avatar" id="author-stats-avatar"></span>
-            <div class="author-profile-info">
-              <div class="author-profile-name" id="author-stats-name"></div>
-              <div class="author-profile-email" id="author-stats-email"></div>
-            </div>
-          </div>
-
-          <!-- Author Summary Cards -->
-          <div class="stat-cards">
-            <div class="stat-card">
-              <div class="stat-card-value" id="au-commits">—</div>
-              <div class="stat-card-label">提交数</div>
-            </div>
-            <div class="stat-card stat-card-add">
-              <div class="stat-card-value" id="au-add">—</div>
-              <div class="stat-card-label">新增行</div>
-            </div>
-            <div class="stat-card stat-card-del">
-              <div class="stat-card-value" id="au-del">—</div>
-              <div class="stat-card-label">删除行</div>
-            </div>
-          </div>
-
-          <!-- Weekday Distribution -->
-          <div class="stats-section">
-            <div class="stats-section-title">活跃时段（按星期）</div>
-            <div id="weekday-chart" class="weekday-chart"></div>
-          </div>
-
-          <!-- Author Top Files -->
-          <div class="stats-section">
-            <div class="stats-section-title">最常修改文件</div>
-            <div id="author-top-files" class="top-files-list"></div>
-          </div>
-
-          <!-- Highlight in graph -->
-          <div class="author-actions">
-            <button class="author-highlight-btn" id="author-highlight-btn">
-              <i class="codicon codicon-eye"></i> 在图谱中高亮此作者
-            </button>
-          </div>
-        </div>
-
-        <!-- ── State 3: Selection History ── -->
-        <div id="selection-history" class="selection-history hidden">
-          <div class="selection-history-header">
-            <span class="selection-history-title"><i class="codicon codicon-history"></i> 选区历史</span>
-          </div>
-          <div class="selection-file-info" id="history-file-info"></div>
-          <div class="history-list" id="history-list"></div>
-        </div>
-
-        <div id="file-blame-stats" class="file-blame-stats hidden">
-          <div class="file-blame-header">
-            <span class="file-blame-title"><i class="codicon codicon-pie-chart"></i> 文件行作者</span>
-          </div>
-          <div class="selection-file-info" id="file-blame-info"></div>
-          
-          <div class="rose-chart-container">
-            <svg id="rose-chart-svg" class="rose-chart-svg" viewBox="-100 -100 200 200"></svg>
-            <div id="rose-chart-tooltip" class="rose-chart-tooltip hidden"></div>
-          </div>
-        </div>
-
-      </div><!-- /details-pane -->
+        <!-- /details-pane -->
+      </div>
     </div>
-  </div>
 
-  <script src="${scriptUri}"></script>
-</body>
+    <script src="${scriptUri}"></script>
+  </body>
 </html>

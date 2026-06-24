@@ -390,6 +390,27 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
           break;
         }
+        case 'openFileHistoryDiff': {
+          const { file, hash, newFilePath } = data;
+          const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
+
+          let leftUri: vscode.Uri;
+          const targetPath = newFilePath || file;
+          const relativeTargetPath = path.isAbsolute(targetPath) ? path.relative(gitRoot, targetPath).replace(/\\/g, '/') : targetPath;
+
+          try {
+            await execGit(['cat-file', '-e', `${hash}:${relativeTargetPath}`], gitRoot);
+            leftUri = await toGitUri(vscode.Uri.file(path.join(gitRoot, relativeTargetPath)), hash);
+          } catch (e) {
+            leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+          }
+
+          const rightUri = vscode.Uri.file(absoluteFilePath);
+          const title = `${path.basename(file)} (${hash.substring(0, 7)} vs 本地工作区)`;
+
+          await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+          break;
+        }
         case 'openWorkspaceFile': {
           const { file, hash } = data;
           // If no hash provided (e.g. from top-files list), open the workspace file directly
@@ -523,6 +544,17 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         filePath: data.filePath,
         startLine: data.startLine,
         endLine: data.endLine,
+        commits: data.commits
+      });
+    }
+  }
+
+  public showFileHistory(data: { filePath: string, commits: any[] }) {
+    if (this._view) {
+      this._view.show(true); // Bring panel view to focus
+      this._view.webview.postMessage({
+        type: 'showFileHistory',
+        filePath: data.filePath,
         commits: data.commits
       });
     }

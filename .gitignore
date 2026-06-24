@@ -3,3 +3,4 @@ node_modules
 dist
 *.vsix
 media/panel.js
+media/panel.js.map

@@ -44,6 +44,7 @@ describe('main.ts Smoke Test', () => {
         postMessage: jest.fn()
       },
       addEventListener: jest.fn(),
+      dispatchEvent: jest.fn(),
       _pendingForceExpand: false
     };
     (global as any).acquireVsCodeApi = () => (global as any).window.vscode;

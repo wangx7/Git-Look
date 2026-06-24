@@ -20,6 +20,7 @@
     "onView:git-visual.graphView",
     "onCommand:git-visual.traceOrigin",
     "onCommand:git-visual.toggleLineBlame",
+    "onCommand:git-visual.traceFileHistory",
     "onCommand:git-visual.openWorkspaceFile"
   ],
   "main": "./dist/extension.js",
@@ -34,21 +35,43 @@
         "title": "Git 行作者"
       },
       {
+        "command": "git-visual.traceFileHistory",
+        "title": "Git 文件历史"
+      },
+      {
         "command": "git-visual.openWorkspaceFile",
         "title": "Git 可视化: 转到当前文件",
         "icon": "$(go-to-file)"
       }
     ],
+    "submenus": [
+      {
+        "id": "git-visual.submenu",
+        "label": "Git Look"
+      }
+    ],
     "menus": {
       "editor/context": [
         {
-          "command": "git-visual.traceOrigin",
+          "submenu": "git-visual.submenu",
           "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ],
+      "git-visual.submenu": [
+        {
+          "command": "git-visual.toggleLineBlame",
+          "group": "1_modification@1",
           "when": "editorTextFocus"
         },
         {
-          "command": "git-visual.toggleLineBlame",
-          "group": "navigation",
+          "command": "git-visual.traceOrigin",
+          "group": "1_modification@2",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "git-visual.traceFileHistory",
+          "group": "1_modification@3",
           "when": "editorTextFocus"
         }
       ],
@@ -84,7 +107,8 @@
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "package": "node esbuild.js --production",
-    "vsix": "vsce package"
+    "vsix": "vsce package",
+    "test": "jest"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

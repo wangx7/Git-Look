@@ -34,6 +34,7 @@ export class StateManager {
       case RightPaneState.AUTHOR: return 2;
       case RightPaneState.HISTORY: return 3;
       case RightPaneState.FILE_BLAME_STATS: return 4;
+      case RightPaneState.FILE_HISTORY: return 5;
       case RightPaneState.LOADING:
       default: return 1;
     }

@@ -30,6 +30,7 @@ export const elements = {
   leftPaneEl: document.querySelector('.left-pane') as HTMLElement,
   mainLayoutEl: document.querySelector('.main-layout') as HTMLElement,
   selectionHistoryEl: document.getElementById('selection-history') as HTMLElement,
+  fileHistoryEl: document.getElementById('file-history') as HTMLElement,
 
   statsStrip: document.getElementById('stats-strip') as HTMLElement,
   stripCommitsVal: document.getElementById('strip-commits-val') as HTMLElement,
