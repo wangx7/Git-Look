@@ -1,9 +1,11 @@
 {
   "name": "git-visual",
-  "displayName": "Git 可视化",
-  "description": "选区历史、行作者、图谱",
-  "version": "1.0.4",
+  "displayName": "Git Look - Git 可视化",
+  "description": "专注于 Git 历史检索与溯源的只读可视化工具，提供全局分支图谱、行内作者提示 (Inline Blame)、选区历史演进及文件历史比对，支持提交数据统计分析。",
+  "version": "1.0.5",
   "publisher": "wangx123",
+  "author": "wangx7",
+  "license": "MIT",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.75.0"
@@ -12,6 +14,21 @@
     "type": "git",
     "url": "https://github.com/wangx7/Git-Look"
   },
+  "bugs": {
+    "url": "https://github.com/wangx7/Git-Look/issues"
+  },
+  "homepage": "https://github.com/wangx7/Git-Look#readme",
+  "keywords": [
+    "git",
+    "git graph",
+    "git blame",
+    "git history",
+    "git visual",
+    "trace",
+    "blame",
+    "selection history",
+    "visualization"
+  ],
   "categories": [
     "SCM Providers",
     "Visualization"
@@ -20,8 +37,7 @@
     "onView:git-visual.graphView",
     "onCommand:git-visual.traceOrigin",
     "onCommand:git-visual.toggleLineBlame",
-    "onCommand:git-visual.traceFileHistory",
-    "onCommand:git-visual.openWorkspaceFile"
+    "onCommand:git-visual.traceFileHistory"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -37,11 +53,6 @@
       {
         "command": "git-visual.traceFileHistory",
         "title": "Git 文件历史"
-      },
-      {
-        "command": "git-visual.openWorkspaceFile",
-        "title": "Git 可视化: 转到当前文件",
-        "icon": "$(go-to-file)"
       }
     ],
     "submenus": [
@@ -73,13 +84,6 @@
           "command": "git-visual.traceFileHistory",
           "group": "1_modification@3",
           "when": "editorTextFocus"
-        }
-      ],
-      "editor/title": [
-        {
-          "command": "git-visual.openWorkspaceFile",
-          "group": "navigation",
-          "when": "resourceScheme == git"
         }
       ]
     },

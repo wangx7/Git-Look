@@ -182,8 +182,7 @@ body {
 }
 
 .search-group {
-  flex-grow: 1;
-  min-width: 140px;
+  width: 130px;
 }
 
 .search-group input {
@@ -1958,6 +1957,7 @@ svg#graph-svg .merge-inner.hovered {
 .left-pane.pane-medium .search-group {
   flex-grow: 0;
   min-width: unset;
+  width: auto;
 }
 
 .left-pane.pane-medium .search-group input {
@@ -2048,6 +2048,7 @@ svg#graph-svg .merge-inner.hovered {
 /* 搜索框最小宽度放宽 */
 .left-pane.pane-narrow .search-group {
   min-width: 60px;
+  width: auto;
 }
 
 /* ══════════════════════════════════════════════════
@@ -2063,8 +2064,13 @@ svg#graph-svg .merge-inner.hovered {
 /* 窄屏：left-pane 占上半部分 */
 .main-layout.layout-narrow .left-pane {
   width: 100% !important;
-  height: 55% !important;
-  flex: none !important;
+  height: 55%;
+  flex: none;
+}
+
+/* 窄屏且详情折叠：left-pane 占满全部 */
+.main-layout.layout-narrow.details-collapsed .left-pane {
+  height: 100% !important;
 }
 
 /* 窄屏：resizer 变为行调整器 */
@@ -2091,7 +2097,7 @@ svg#graph-svg .merge-inner.hovered {
   width: 100% !important;
   max-width: 100% !important;
   min-width: unset !important;
-  height: calc(45% - 4px) !important;
+  height: calc(45% - 4px);
   transform: none !important;
   box-shadow: none !important;
   border-left: none !important;
@@ -2125,24 +2131,10 @@ svg#graph-svg .merge-inner.hovered {
   color: var(--fg-color);
 }
 
-/* ── filter-bar 换行 (整体 < 400px) ──────────────── */
+/* ── filter-bar 窄屏样式 ──────────────── */
 .main-layout.layout-narrow .filter-bar {
-  flex-wrap: wrap;
-  overflow-x: hidden;
-  height: auto;
-  min-height: unset;
   padding: 5px 8px;
   gap: 4px;
-}
-
-.main-layout.layout-narrow .filter-bar .filter-group:not(.search-group):not(.date-range-group) {
-  flex-shrink: 0;
-}
-
-.main-layout.layout-narrow .filter-bar .search-group {
-  flex: 1 1 100%;
-  min-width: 0;
-  order: 10;
 }
 
 .main-layout.layout-narrow .filter-bar #reset-btn span {
