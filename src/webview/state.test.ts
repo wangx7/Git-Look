@@ -36,6 +36,9 @@ describe('StateManager', () => {
     state.rightPaneState = RightPaneState.FILE_BLAME_STATS;
     expect(state.getRightPaneStateNumber()).toBe(4);
 
+    state.rightPaneState = RightPaneState.FILE_HISTORY;
+    expect(state.getRightPaneStateNumber()).toBe(5);
+
     state.rightPaneVisible = 0;
     expect(state.getRightPaneStateNumber()).toBe(0);
   });

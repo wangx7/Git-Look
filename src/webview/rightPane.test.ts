@@ -31,6 +31,7 @@ jest.mock('./dom', () => {
       authorStatsPane: mockEl(),
       detailsPlaceholder: mockEl(),
       selectionHistoryEl: mockEl(),
+      fileHistoryEl: mockEl(),
       mainLayoutEl: mockEl(),
     }
   };
@@ -102,5 +103,8 @@ describe('rightPane', () => {
     state.currentFocusedAuthor = 'Author Name';
     setRightPaneStateByNumber(2);
     expect(state.rightPaneState).toBe(RightPaneState.AUTHOR);
+
+    setRightPaneStateByNumber(5);
+    expect(state.rightPaneState).toBe(RightPaneState.FILE_HISTORY);
   });
 });
