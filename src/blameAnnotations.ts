@@ -100,6 +100,12 @@ export class BlameAnnotationsManager implements vscode.Disposable {
     }
   }
 
+  public async turnOn(editor?: vscode.TextEditor) {
+    if (!this.enabled) {
+      await this.toggle(editor);
+    }
+  }
+
   public highlightCommitLines(editor: vscode.TextEditor, hash: string, color: string) {
     this.clearHighlight(editor);
     if (!this.enabled || !hash) return;

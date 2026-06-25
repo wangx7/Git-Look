@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { GitGraphProvider } from './panel/gitGraphProvider';
-import { execGit, traceLineHistory, hasLocalModifications, clearGitCache, traceFileHistory, hasFileLocalModifications } from './gitHelper';
+import { execGit, traceLineHistory, hasLocalModifications, clearGitCache, traceFileHistory, hasFileLocalModifications, toGitUri } from './gitHelper';
 import { BlameAnnotationsManager } from './blameAnnotations';
+import { FileHeaderCodeLensProvider } from './fileHeaderCodeLens';
 
 export function activate(context: vscode.ExtensionContext) {
   // Register a dummy document content provider for the git-visual scheme
@@ -254,6 +255,93 @@ export function activate(context: vscode.ExtensionContext) {
     await blameAnnotationsManager.toggle(editor);
   });
   context.subscriptions.push(toggleBlameCommand);
+
+  // 3.6 Register File Header CodeLens Provider
+  const fileHeaderProvider = new FileHeaderCodeLensProvider(getCwd);
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider({ scheme: 'file' }, fileHeaderProvider)
+  );
+
+  // Refresh file header CodeLens on save and document changes
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument(() => {
+      fileHeaderProvider.refresh();
+    })
+  );
+
+  let fileHeaderChangeDebounce: NodeJS.Timeout | undefined;
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(() => {
+      if (fileHeaderChangeDebounce) {
+        clearTimeout(fileHeaderChangeDebounce);
+      }
+      fileHeaderChangeDebounce = setTimeout(() => {
+        fileHeaderProvider.refresh();
+      }, 1000);
+    })
+  );
+
+  // Register Open File Recent Diff command
+  const openFileRecentDiffCommand = vscode.commands.registerCommand('git-visual.openFileRecentDiff', async (filePath: string, diffKind: 'workingTree' | 'commit', hash?: string, isNewFile?: boolean) => {
+    if (!filePath || isNewFile) {
+      return;
+    }
+
+    const cwd = getCwd();
+    if (!cwd) {
+      vscode.window.showWarningMessage('未找到工作区，请先打开一个 Git 项目文件夹！');
+      return;
+    }
+
+    let gitRoot = cwd;
+    try {
+      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+    } catch (e) {
+      vscode.window.showWarningMessage('当前文件不在 Git 仓库中！');
+      return;
+    }
+
+    const fileUri = vscode.Uri.file(filePath);
+    const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
+
+    try {
+      if (diffKind === 'workingTree') {
+        const leftUri = await toGitUri(fileUri, 'HEAD');
+        const title = `${path.basename(filePath)} (HEAD vs 工作区)`;
+        await vscode.commands.executeCommand('vscode.diff', leftUri, fileUri, title);
+      } else if (hash) {
+        const parentHash = (await execGit(['log', '-1', '--pretty=%P', hash], gitRoot)).trim().split(' ')[0];
+        const emptyUri = vscode.Uri.from({ scheme: 'git-visual', path: filePath });
+        let leftUri = emptyUri;
+        if (parentHash) {
+          try {
+            await execGit(['cat-file', '-e', `${parentHash}:${repoFilePath}`], gitRoot);
+            leftUri = await toGitUri(fileUri, parentHash);
+          } catch (e) {
+            // keep emptyUri
+          }
+        }
+        const rightUri = await toGitUri(fileUri, hash);
+        const title = `${path.basename(filePath)} (${parentHash ? parentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
+        await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+      }
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`打开 diff 失败: ${err.message}`);
+    }
+  });
+  context.subscriptions.push(openFileRecentDiffCommand);
+
+  // Register Show/Toggle Line Blame command from file header
+  const showLineBlameCommand = vscode.commands.registerCommand('git-visual.showLineBlame', async (isNewFile?: boolean) => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || isNewFile) {
+      return;
+    }
+
+    await blameAnnotationsManager.toggle(editor);
+    fileHeaderProvider.refresh();
+  });
+  context.subscriptions.push(showLineBlameCommand);
 
   // 4. Register Open Current Workspace File command
   const openWorkspaceFileCommand = vscode.commands.registerCommand('git-visual.openWorkspaceFile', async (uri: vscode.Uri) => {

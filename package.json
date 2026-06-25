@@ -2,7 +2,7 @@
   "name": "git-visual",
   "displayName": "Git Look - Git 可视化",
   "description": "专注于 Git 历史检索与溯源的只读可视化工具，提供全局分支图谱、行内作者提示 (Inline Blame)、选区历史演进及文件历史比对，支持提交数据统计分析。",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "publisher": "wangx123",
   "author": "wangx7",
   "license": "MIT",
@@ -34,10 +34,13 @@
     "Visualization"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:git-visual.graphView",
     "onCommand:git-visual.traceOrigin",
     "onCommand:git-visual.toggleLineBlame",
-    "onCommand:git-visual.traceFileHistory"
+    "onCommand:git-visual.traceFileHistory",
+    "onCommand:git-visual.openFileRecentDiff",
+    "onCommand:git-visual.showLineBlame"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -53,6 +56,14 @@
       {
         "command": "git-visual.traceFileHistory",
         "title": "Git 文件历史"
+      },
+      {
+        "command": "git-visual.openFileRecentDiff",
+        "title": "Git Look: 打开最近文件 Diff"
+      },
+      {
+        "command": "git-visual.showLineBlame",
+        "title": "Git Look: 显示行作者"
       }
     ],
     "submenus": [

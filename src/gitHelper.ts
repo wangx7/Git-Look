@@ -991,3 +991,124 @@ export async function traceFileHistory(
     return [];
   }
 }
+
+export interface GitUser {
+  name?: string;
+  email?: string;
+}
+
+export async function getCurrentGitUser(gitRoot: string, signal?: AbortSignal): Promise<GitUser> {
+  try {
+    const [name, email] = await Promise.all([
+      execGit(['config', 'user.name'], gitRoot, signal).then(s => s.trim()).catch(() => ''),
+      execGit(['config', 'user.email'], gitRoot, signal).then(s => s.trim()).catch(() => '')
+    ]);
+    return {
+      name: name || undefined,
+      email: email || undefined
+    };
+  } catch (e) {
+    console.error('Error getting current git user:', e);
+    return {};
+  }
+}
+
+export interface FileLastCommit {
+  hash: string;
+  author: string;
+  email: string;
+  timestamp: number;
+  message: string;
+}
+
+export async function getFileLastCommit(
+  gitRoot: string,
+  repoFilePath: string,
+  signal?: AbortSignal
+): Promise<FileLastCommit | undefined> {
+  try {
+    const output = await execGit(
+      ['log', '-1', '--follow', '--pretty=format:%H%x1f%aN%x1f%aE%x1f%at%x1f%s', '--', repoFilePath],
+      gitRoot,
+      signal
+    );
+    const trimmed = output.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const parts = trimmed.split('\x1f');
+    if (parts.length < 5) {
+      return undefined;
+    }
+    const [hash, author, email, timestampStr, ...messageParts] = parts;
+    return {
+      hash,
+      author,
+      email,
+      timestamp: parseInt(timestampStr, 10) || 0,
+      message: messageParts.join('\x1f')
+    };
+  } catch (e) {
+    console.error('Error getting file last commit:', e);
+    return undefined;
+  }
+}
+
+export interface FileAuthor {
+  name: string;
+  email: string;
+}
+
+const NOT_COMMITTED_EMAIL = 'not.committed.yet';
+
+export async function getFileAuthors(
+  gitRoot: string,
+  repoFilePath: string,
+  signal?: AbortSignal
+): Promise<FileAuthor[]> {
+  try {
+    // Use git blame --porcelain so the author set matches the line blame view exactly.
+    const output = await execGit(['blame', '--porcelain', repoFilePath], gitRoot, signal);
+    const authorsByEmail = new Map<string, FileAuthor>();
+    const lines = output.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith('author ')) {
+        const name = line.substring(7).trim();
+        const nextLine = lines[i + 1] || '';
+        let email = '';
+        if (nextLine.startsWith('author-mail ')) {
+          email = nextLine.substring(12).trim();
+          if (email.startsWith('<') && email.endsWith('>')) {
+            email = email.slice(1, -1);
+          }
+        }
+        if (email && email !== NOT_COMMITTED_EMAIL) {
+          authorsByEmail.set(email.toLowerCase(), { name: name || 'Unknown', email: email.toLowerCase() });
+        }
+      }
+    }
+
+    return Array.from(authorsByEmail.values());
+  } catch (e) {
+    console.error('Error getting file authors:', e);
+    return [];
+  }
+}
+
+export async function isFileTracked(
+  gitRoot: string,
+  repoFilePath: string,
+  signal?: AbortSignal
+): Promise<boolean> {
+  try {
+    const output = await execGit(['ls-files', '--', repoFilePath], gitRoot, signal);
+    return output.trim().length > 0;
+  } catch (e) {
+    console.error('Error checking if file is tracked:', e);
+    return false;
+  }
+}
+
+
