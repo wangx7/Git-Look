@@ -413,11 +413,13 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         }
         case 'openFileHistoryDiff': {
           const { file, hash, parentHash, oldFilePath, newFilePath } = data;
-          const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
+          // file is already repo-relative path from file history
+          const relativeFilePath = path.isAbsolute(file) ? path.relative(gitRoot, file).replace(/\\/g, '/') : file;
+          const absoluteFilePath = path.join(gitRoot, relativeFilePath);
 
           let leftUri: vscode.Uri;
-          const targetPath = oldFilePath || newFilePath || file;
-          const relativeTargetPath = path.isAbsolute(targetPath) ? path.relative(gitRoot, targetPath).replace(/\\/g, '/') : targetPath;
+          // For renamed files, use oldFilePath to look up in parent commit
+          const relativeTargetPath = oldFilePath || newFilePath || relativeFilePath;
 
           if (!parentHash || parentHash === 'empty') {
             leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
@@ -426,12 +428,18 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
               await execGit(['cat-file', '-e', `${parentHash}:${relativeTargetPath}`], gitRoot);
               leftUri = await toGitUri(vscode.Uri.file(path.join(gitRoot, relativeTargetPath)), parentHash);
             } catch (e) {
-              leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+              // Fallback: try with current file path if old path doesn't exist
+              try {
+                await execGit(['cat-file', '-e', `${parentHash}:${relativeFilePath}`], gitRoot);
+                leftUri = await toGitUri(vscode.Uri.file(absoluteFilePath), parentHash);
+              } catch (e2) {
+                leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+              }
             }
           }
 
           const rightUri = vscode.Uri.file(absoluteFilePath);
-          const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs 本地工作区)`;
+          const title = `${path.basename(relativeFilePath)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs 本地工作区)`;
 
           await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
           break;

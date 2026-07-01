@@ -267,6 +267,15 @@ export async function isGitRepository(cwd: string): Promise<boolean> {
   }
 }
 
+export async function getGitRoot(cwd: string): Promise<string | null> {
+  try {
+    const root = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+    return root;
+  } catch {
+    return null;
+  }
+}
+
 export async function getBranches(cwd: string): Promise<string[]> {
   try {
     const output = await execGit(['branch', '-a', '--format=%(refname:short)'], cwd);

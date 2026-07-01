@@ -2,7 +2,7 @@
   "name": "git-visual",
   "displayName": "Git Look - Git 可视化",
   "description": "专注于 Git 历史检索与溯源的只读可视化工具，提供全局分支图谱、行内作者提示 (Inline Blame)、选区历史演进及文件历史比对，支持提交数据统计分析。",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "publisher": "wangx123",
   "author": "wangx7",
   "license": "MIT",

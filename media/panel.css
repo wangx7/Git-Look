@@ -30,6 +30,11 @@
   --accent-dim: var(--vscode-button-background, #0e639c);
   --accent-glow: rgba(0, 127, 212, 0.18);
 
+  /* Badge colors for hash badge - use VS Code built-in badge variables for theme compatibility */
+  --badge-bg: var(--vscode-badge-background, rgba(128, 128, 128, 0.22));
+  --badge-fg: var(--vscode-badge-foreground, var(--vscode-foreground, #cccccc));
+  --badge-border: var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+
   /* Row states */
   --row-hover-bg: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
   --row-selected-bg: var(--vscode-list-activeSelectionBackground, rgba(255, 255, 255, 0.10));
@@ -782,19 +787,19 @@ tr.commit-row.selected td.content-col {
 .detail-hash-copyable {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--accent);
+  color: var(--badge-fg);
   cursor: pointer;
-  background-color: var(--accent-glow);
+  background-color: var(--badge-bg);
   padding: 2px 8px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(0, 127, 212, 0.30);
+  border: 1px solid var(--badge-border);
   user-select: none;
   transition: all var(--transition-fast);
   letter-spacing: 0.03em;
 }
 
 .detail-hash-copyable:hover {
-  background-color: rgba(0, 127, 212, 0.28);
+  filter: brightness(1.2);
   text-decoration: underline;
 }
 

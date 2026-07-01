@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { isGitRepository } from './gitHelper';
+import { isGitRepository, getGitRoot } from './gitHelper';
 
 export interface RepoInfo {
   root: string;          // Absolute path to the git repo root
@@ -70,11 +70,11 @@ export class RepoManager implements vscode.Disposable {
     const oldRoots = this._repos.map(r => r.root);
     this._repos = [];
 
-    // Source 1: vscode.git extension API (most reliable)
+    // Source 1: vscode.git extension API (most reliable, already gives root)
     if (this._gitApi?.repositories) {
       for (const repo of this._gitApi.repositories) {
         const root = repo.rootUri.fsPath;
-        this._addRepo(root);
+        await this._addRepo(root);
       }
     }
 
@@ -83,13 +83,10 @@ export class RepoManager implements vscode.Disposable {
     if (folders) {
       for (const folder of folders) {
         const folderPath = folder.uri.fsPath;
-        // Skip if already discovered via git API
-        if (this._repos.some(r => r.root === folderPath)) {
-          continue;
-        }
-        const isRepo = await isGitRepository(folderPath);
-        if (isRepo) {
-          this._addRepo(folderPath);
+        // Check if it's inside a git repo and resolve to the actual git root
+        const gitRoot = await getGitRoot(folderPath);
+        if (gitRoot) {
+          await this._addRepo(gitRoot);
         }
       }
     }
@@ -108,13 +105,31 @@ export class RepoManager implements vscode.Disposable {
     }
   }
 
-  private _addRepo(root: string): void {
-    if (this._repos.some(r => r.root === root)) {
+  private async _addRepo(root: string): Promise<void> {
+    // Always resolve to the actual git root to handle nested directories
+    const actualRoot = await getGitRoot(root);
+    const finalRoot = actualRoot || root;
+    
+    if (this._repos.some(r => r.root === finalRoot)) {
       return; // Deduplicate
     }
-    const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root));
-    const name = folder?.name || path.basename(root);
-    this._repos.push({ root, name });
+    
+    // Use the workspace folder name if this root contains the workspace folder,
+    // otherwise use the basename of the git root
+    let name: string;
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    const matchingFolder = workspaceFolders?.find(f => {
+      const rel = path.relative(finalRoot, f.uri.fsPath);
+      return !rel.startsWith('..') && !path.isAbsolute(rel);
+    });
+    
+    if (matchingFolder) {
+      name = matchingFolder.name;
+    } else {
+      name = path.basename(finalRoot);
+    }
+    
+    this._repos.push({ root: finalRoot, name });
   }
 
   /** All discovered repositories. */
