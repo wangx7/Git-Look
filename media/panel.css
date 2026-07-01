@@ -213,6 +213,56 @@ body {
   color: var(--fg-color);
 }
 
+/* ── Repo selector ──────────────────────────────── */
+.repo-selector-group {
+  border-color: var(--accent-dim);
+}
+
+.repo-selector-group::after {
+  content: '';
+  width: 1px;
+  height: 18px;
+  background-color: var(--border-color);
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.repo-selector-group select {
+  max-width: 200px;
+  font-weight: 600;
+}
+
+/* ── Empty state ─────────────────────────────────── */
+.empty-state {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.empty-state .codicon {
+  font-size: 42px;
+  opacity: 0.3;
+}
+
+.empty-state > span:first-of-type {
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+
+.empty-state-hint {
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
 /* ── Error banner ──────────────────────────────── */
 .error-banner {
   background-color: var(--error-bg);

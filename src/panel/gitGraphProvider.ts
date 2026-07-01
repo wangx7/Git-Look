@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri } from '../gitHelper';
+import { RepoManager } from '../repoManager';
 
 export class GitGraphProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'git-visual.graphView';
@@ -12,6 +13,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _currentGitDir?: string;
   private _gitWatcher?: fs.FSWatcher;
   private _debounceTimer?: NodeJS.Timeout;
+  private _repoDisposables: vscode.Disposable[] = [];
 
   public showFileBlameStats(fileName: string, stats: { author: string; lines: number }[]) {
     if (this._view) {
@@ -35,7 +37,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    private readonly _getCwd: () => string | undefined
+    private readonly _repoManager: RepoManager
   ) { }
 
   public setBlameManager(manager: any) {
@@ -51,6 +53,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidDispose(() => {
       this._disposeGitWatcher();
+      this._repoDisposables.forEach(d => { try { d.dispose(); } catch { /* ignore */ } });
+      this._repoDisposables = [];
     });
 
     webviewView.webview.options = {
@@ -63,19 +67,36 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
+    // Listen for repo list / selection changes and push to webview
+    // Both events need data reload: list change may alter the selected repo root
+    this._repoDisposables.push(
+      this._repoManager.onDidChangeRepos(() => this._sendReposToWebview(true))
+    );
+    this._repoDisposables.push(
+      this._repoManager.onDidChangeSelection(() => this._sendReposToWebview(true))
+    );
+
     webviewView.webview.onDidReceiveMessage(async (data) => {
-      const cwd = this._getCwd();
-      if (!cwd) {
-        webviewView.webview.postMessage({ type: 'error', error: '未打开工作区或找不到项目目录' });
-        return;
+      // Handle repo management commands first (no git root needed)
+      switch (data.command) {
+        case 'getRepos': {
+          this._sendReposToWebview(false);
+          return;
+        }
+        case 'switchRepo': {
+          this._repoManager.selectRepo(data.index);
+          clearGitCache();
+          // onDidChangeSelection will trigger _sendReposToWebview(true) → webview reloads
+          return;
+        }
       }
 
-      // Resolve Git Root
-      let gitRoot = cwd;
-      try {
-        gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-      } catch (e) {
-        // Ignore
+      const gitRoot = this._repoManager.getSelectedRoot();
+      if (!gitRoot) {
+        // No git repository — notify webview to show empty state
+        this._sendReposToWebview(false);
+        webviewView.webview.postMessage({ type: 'hideLoading' });
+        return;
       }
 
       switch (data.command) {
@@ -391,22 +412,26 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'openFileHistoryDiff': {
-          const { file, hash, newFilePath } = data;
+          const { file, hash, parentHash, oldFilePath, newFilePath } = data;
           const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
 
           let leftUri: vscode.Uri;
-          const targetPath = newFilePath || file;
+          const targetPath = oldFilePath || newFilePath || file;
           const relativeTargetPath = path.isAbsolute(targetPath) ? path.relative(gitRoot, targetPath).replace(/\\/g, '/') : targetPath;
 
-          try {
-            await execGit(['cat-file', '-e', `${hash}:${relativeTargetPath}`], gitRoot);
-            leftUri = await toGitUri(vscode.Uri.file(path.join(gitRoot, relativeTargetPath)), hash);
-          } catch (e) {
+          if (!parentHash || parentHash === 'empty') {
             leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+          } else {
+            try {
+              await execGit(['cat-file', '-e', `${parentHash}:${relativeTargetPath}`], gitRoot);
+              leftUri = await toGitUri(vscode.Uri.file(path.join(gitRoot, relativeTargetPath)), parentHash);
+            } catch (e) {
+              leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+            }
           }
 
           const rightUri = vscode.Uri.file(absoluteFilePath);
-          const title = `${path.basename(file)} (${hash.substring(0, 7)} vs 本地工作区)`;
+          const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs 本地工作区)`;
 
           await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
           break;
@@ -558,6 +583,23 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         commits: data.commits
       });
     }
+  }
+
+  /**
+   * Push the current repo list + selected index to the webview.
+   * @param needsReload If true, the webview should reload data (e.g. after repo switch).
+   */
+  private _sendReposToWebview(needsReload: boolean) {
+    if (!this._view) {
+      return;
+    }
+    const repos = this._repoManager.repos.map(r => ({ root: r.root, name: r.name }));
+    this._view.webview.postMessage({
+      type: 'reposLoaded',
+      repos,
+      selectedIndex: this._repoManager.selectedIndex,
+      needsReload
+    });
   }
 
   private _setupGitWatcher(cwd: string) {

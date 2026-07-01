@@ -39,12 +39,24 @@ jest.mock('../gitHelper', () => ({
   clearGitCache: jest.fn()
 }));
 
+/** Mock RepoManager that returns '/mock/git/root' as the selected repo. */
+function createMockRepoManager() {
+  return {
+    getSelectedRoot: () => '/mock/git/root',
+    repos: [],
+    selectedIndex: 0,
+    onDidChangeRepos: () => ({ dispose: jest.fn() }),
+    onDidChangeSelection: () => ({ dispose: jest.fn() }),
+    selectRepo: jest.fn(),
+  } as any;
+}
+
 describe('GitGraphProvider Diff Logic', () => {
   let provider: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    provider = new GitGraphProvider({} as any, () => 'test-cwd');
+    provider = new GitGraphProvider({} as any, createMockRepoManager());
   });
 
   const createMockWebviewView = (messageListenerRef: { current: any }) => {

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { execGit } from './gitHelper';
 import { GitGraphProvider } from './panel/gitGraphProvider';
+import { RepoManager } from './repoManager';
 
 function formatBlameLabel(dateStr: string, name: string): string {
   const maxNameLen = 8;
@@ -18,15 +19,15 @@ export class BlameAnnotationsManager implements vscode.Disposable {
   private enabled = false;
   private decorationType: vscode.TextEditorDecorationType;
   private disposables: vscode.Disposable[] = [];
-  private getCwd: () => string | undefined;
   private gitGraphProvider: GitGraphProvider;
+  private repoManager: RepoManager;
   private _updateGeneration = 0;
   private _abortController?: AbortController;
   private currentHighlightDeco: vscode.TextEditorDecorationType | null = null;
   private lineHashMapping: string[] = [];
 
-  constructor(getCwd: () => string | undefined, gitGraphProvider: GitGraphProvider) {
-    this.getCwd = getCwd;
+  constructor(repoManager: RepoManager, gitGraphProvider: GitGraphProvider) {
+    this.repoManager = repoManager;
     this.gitGraphProvider = gitGraphProvider;
 
     // Create the decoration type for git blame gutter annotations
@@ -147,8 +148,8 @@ export class BlameAnnotationsManager implements vscode.Disposable {
       return;
     }
 
-    const cwd = this.getCwd();
-    if (!cwd) {
+    const gitRoot = this.repoManager.getRepoForFile(document.uri);
+    if (!gitRoot) {
       editor.setDecorations(this.decorationType, []);
       return;
     }
@@ -163,15 +164,7 @@ export class BlameAnnotationsManager implements vscode.Disposable {
     const signal = this._abortController.signal;
 
     try {
-      // Resolve Git Root
-      let gitRoot = cwd;
-      try {
-        gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd, signal)).trim();
-      } catch (e) {
-        // Ignore
-      }
-
-      // Compute Relative Path
+      // Compute Relative Path (gitRoot is already the repo root from RepoManager)
       const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
 
       // Run git blame with porcelain output

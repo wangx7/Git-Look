@@ -49,11 +49,13 @@ export function renderFileHistory(filePath: string, historyCommits: any[]) {
         card.classList.add('active');
         activeHistoryHash = c.hash;
 
-        // postMessage to open diff with target history version vs local workspace file!
+        // postMessage to open diff with parent of target history version vs local workspace file!
         window.vscode.postMessage({
           command: 'openFileHistoryDiff',
           file: filePath,
           hash: c.hash,
+          parentHash: c.parentHash,
+          oldFilePath: c.oldFilePath,
           newFilePath: c.newFilePath
         });
       });

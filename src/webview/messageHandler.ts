@@ -11,6 +11,7 @@ import { renderStatsStrip, renderOverviewStats } from './statsCharts';
 import { RightPaneState } from './types';
 import { showAuthorDetail } from './authorDetail';
 import { updateVirtualList } from './virtualList';
+import { updateRepoSelector, showEmptyState, hideEmptyState, updateRepoSelectorVisibility } from './repoSelector';
 
 export function initMessageHandler() {
   window.addEventListener('message', event => {
@@ -20,6 +21,30 @@ export function initMessageHandler() {
       case 'refresh':
         reloadData();
         break;
+      case 'hideLoading':
+        hideLoading();
+        state.isFetching = false;
+        break;
+      case 'reposLoaded': {
+        hideLoading();
+        state.isFetching = false;
+        state.repos = message.repos || [];
+        state.selectedRepoIndex = message.selectedIndex ?? 0;
+
+        updateRepoSelector();
+        updateRepoSelectorVisibility();
+
+        if (state.repos.length === 0) {
+          showEmptyState();
+        } else {
+          hideEmptyState();
+          // Reload data when the selected repo changed (switched by user or list changed)
+          if (message.needsReload) {
+            reloadData();
+          }
+        }
+        break;
+      }
       case 'error':
         hideLoading();
         state.isFetching = false;

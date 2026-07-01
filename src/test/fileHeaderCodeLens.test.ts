@@ -37,6 +37,13 @@ jest.mock('vscode', () => ({
   }))
 }), { virtual: true });
 
+/** Mock RepoManager that returns '/mock/git/root' for any file. */
+function createMockRepoManager() {
+  return {
+    getRepoForFile: () => '/mock/git/root',
+  } as any;
+}
+
 describe('fileHeaderCodeLens', () => {
   describe('formatDateTimeChinese', () => {
     it('should format date as YYYY/MM/DD HH:MM', () => {
@@ -120,14 +127,13 @@ describe('fileHeaderCodeLens', () => {
     });
 
     it('should return empty array for untitled documents', async () => {
-      const provider = new FileHeaderCodeLensProvider(() => '/mock/path');
+      const provider = new FileHeaderCodeLensProvider(createMockRepoManager());
       const document = { isUntitled: true, uri: { scheme: 'file' } } as any;
       const lenses = await provider.provideCodeLenses(document);
       expect(lenses).toEqual([]);
     });
 
     it('should return CodeLenses for tracked file with history', async () => {
-      (gitHelper.execGit as jest.Mock).mockResolvedValue('/mock/git/root');
       (gitHelper.hasFileLocalModifications as jest.Mock).mockResolvedValue(false);
       (gitHelper.isFileTracked as jest.Mock).mockResolvedValue(true);
       (gitHelper.getFileLastCommit as jest.Mock).mockResolvedValue({
@@ -145,7 +151,7 @@ describe('fileHeaderCodeLens', () => {
         email: 'jiapengyan@example.com'
       });
 
-      const provider = new FileHeaderCodeLensProvider(() => '/mock/path');
+      const provider = new FileHeaderCodeLensProvider(createMockRepoManager());
       const document = {
         isUntitled: false,
         uri: { scheme: 'file', fsPath: path.join('/mock/git/root', 'src', 'file.ts') }
@@ -162,7 +168,6 @@ describe('fileHeaderCodeLens', () => {
     it('should pass isNewFile=true for untracked new files', async () => {
       (fs.existsSync as jest.Mock).mockReturnValue(true);
       (fs.statSync as jest.Mock).mockReturnValue({ size: 100 });
-      (gitHelper.execGit as jest.Mock).mockResolvedValue('/mock/git/root');
       (gitHelper.hasFileLocalModifications as jest.Mock).mockResolvedValue(false);
       (gitHelper.isFileTracked as jest.Mock).mockResolvedValue(false);
       (gitHelper.getFileLastCommit as jest.Mock).mockResolvedValue(undefined);
@@ -172,7 +177,7 @@ describe('fileHeaderCodeLens', () => {
         email: 'jiapengyan@example.com'
       });
 
-      const provider = new FileHeaderCodeLensProvider(() => '/mock/path');
+      const provider = new FileHeaderCodeLensProvider(createMockRepoManager());
       const document = {
         isUntitled: false,
         uri: { scheme: 'file', fsPath: path.join('/mock/git/root', 'new-file.ts') }

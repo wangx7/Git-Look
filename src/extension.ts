@@ -5,8 +5,9 @@ import { GitGraphProvider } from './panel/gitGraphProvider';
 import { execGit, traceLineHistory, hasLocalModifications, clearGitCache, traceFileHistory, hasFileLocalModifications, toGitUri } from './gitHelper';
 import { BlameAnnotationsManager } from './blameAnnotations';
 import { FileHeaderCodeLensProvider } from './fileHeaderCodeLens';
+import { RepoManager } from './repoManager';
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   // Register a dummy document content provider for the git-visual scheme
   // so that VS Code can resolve git-visual URIs (used for custom labels in multi-diff editors).
   const docProvider = vscode.workspace.registerTextDocumentContentProvider('git-visual', {
@@ -23,24 +24,13 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Helper to get active workspace folder CWD
-  const getCwd = () => {
-    const editor = vscode.window.activeTextEditor;
-    if (editor) {
-      const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
-      if (folder) {
-        return folder.uri.fsPath;
-      }
-    }
-    const folders = vscode.workspace.workspaceFolders;
-    if (folders && folders.length > 0) {
-      return folders[0].uri.fsPath;
-    }
-    return undefined;
-  };
+  // Centralized repository manager for multi-repo support
+  const repoManager = new RepoManager();
+  await repoManager.init();
+  context.subscriptions.push(repoManager);
 
   // 1. Register Git Graph panel provider
-  const gitGraphProvider = new GitGraphProvider(context.extensionUri, getCwd);
+  const gitGraphProvider = new GitGraphProvider(context.extensionUri, repoManager);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(GitGraphProvider.viewType, gitGraphProvider)
   );
@@ -59,9 +49,9 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const cwd = getCwd();
+    const cwd = repoManager.getRepoForFile(document.uri);
     if (!cwd) {
-      vscode.window.showWarningMessage('未找到工作区，请先打开一个 Git 项目文件夹！');
+      vscode.window.showWarningMessage('当前文件不在 Git 仓库中！');
       return;
     }
 
@@ -103,11 +93,8 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        let repoRoot = cwd;
-        try {
-          repoRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-        } catch (e) { }
-        const repoFilePath = path.relative(repoRoot, filePath).replace(/\\/g, '/');
+        // cwd is already the git root from RepoManager
+        const repoFilePath = path.relative(cwd, filePath).replace(/\\/g, '/');
 
         const commitsToSend = commits.map(c => ({
           hash: c.hash,
@@ -169,9 +156,9 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const cwd = getCwd();
+    const cwd = repoManager.getRepoForFile(document.uri);
     if (!cwd) {
-      vscode.window.showWarningMessage('未找到工作区，请先打开一个 Git 项目文件夹！');
+      vscode.window.showWarningMessage('当前文件不在 Git 仓库中！');
       return;
     }
 
@@ -200,11 +187,8 @@ export function activate(context: vscode.ExtensionContext) {
       }, async () => {
         const commits = await traceFileHistory(cwd, filePath, startRef);
         
-        let repoRoot = cwd;
-        try {
-          repoRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-        } catch (e) {}
-        const repoFilePath = path.relative(repoRoot, filePath).replace(/\\/g, '/');
+        // cwd is already the git root from RepoManager
+        const repoFilePath = path.relative(cwd, filePath).replace(/\\/g, '/');
 
         const hasLocalChanges = !startRef && (await hasFileLocalModifications(cwd, filePath));
 
@@ -246,7 +230,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(traceFileHistoryCommand);
 
   // 3.5 Register Toggle Blame Annotations command (Git 行作者)
-  const blameAnnotationsManager = new BlameAnnotationsManager(getCwd, gitGraphProvider);
+  const blameAnnotationsManager = new BlameAnnotationsManager(repoManager, gitGraphProvider);
   gitGraphProvider.setBlameManager(blameAnnotationsManager);
   context.subscriptions.push(blameAnnotationsManager);
 
@@ -257,7 +241,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(toggleBlameCommand);
 
   // 3.6 Register File Header CodeLens Provider
-  const fileHeaderProvider = new FileHeaderCodeLensProvider(getCwd);
+  const fileHeaderProvider = new FileHeaderCodeLensProvider(repoManager);
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider({ scheme: 'file' }, fileHeaderProvider)
   );
@@ -287,16 +271,8 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const cwd = getCwd();
-    if (!cwd) {
-      vscode.window.showWarningMessage('未找到工作区，请先打开一个 Git 项目文件夹！');
-      return;
-    }
-
-    let gitRoot = cwd;
-    try {
-      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-    } catch (e) {
+    const gitRoot = repoManager.getRepoForFile(vscode.Uri.file(filePath));
+    if (!gitRoot) {
       vscode.window.showWarningMessage('当前文件不在 Git 仓库中！');
       return;
     }
@@ -356,17 +332,10 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const cwd = getCwd();
-    if (!cwd) {
+    const repoRoot = repoManager.getSelectedRoot();
+    if (!repoRoot) {
       vscode.window.showWarningMessage('未找到工作区，请先打开一个 Git 项目文件夹！');
       return;
-    }
-
-    let repoRoot = cwd;
-    try {
-      repoRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-    } catch (e) {
-      // Ignore
     }
 
     let relativePath = '';

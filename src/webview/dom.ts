@@ -1,4 +1,7 @@
 export const elements = {
+  repoSelect: document.getElementById('repo-select') as HTMLSelectElement,
+  repoSelectorGroup: document.querySelector('.repo-selector-group') as HTMLElement,
+  emptyState: document.getElementById('empty-state') as HTMLElement,
   branchSelect: document.getElementById('branch-select') as HTMLSelectElement,
   authorSelect: document.getElementById('author-select') as HTMLSelectElement,
   datePresetSelect: document.getElementById('date-preset-select') as HTMLSelectElement,

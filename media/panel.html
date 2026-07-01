@@ -24,6 +24,14 @@
         <div class="left-pane">
           <!-- 过滤工具栏 -->
           <div class="filter-bar">
+            <!-- 仓库选择器（多仓库时显示） -->
+            <div class="filter-group repo-selector-group hidden">
+              <label for="repo-select"><i class="codicon codicon-repo"></i></label>
+              <select id="repo-select">
+                <option value="">仓库</option>
+              </select>
+            </div>
+
             <div class="filter-group">
               <label for="branch-select"><i class="codicon codicon-git-branch"></i></label>
               <select id="branch-select">
@@ -71,6 +79,12 @@
 
           <!-- Left Pane: Commit History List -->
           <div class="list-pane">
+            <!-- 空状态：无 Git 仓库 -->
+            <div id="empty-state" class="empty-state hidden">
+              <i class="codicon codicon-repo"></i>
+              <span>未找到 Git 仓库</span>
+              <span class="empty-state-hint">请打开一个包含 Git 仓库的文件夹</span>
+            </div>
             <div class="canvas-wrapper">
               <svg id="graph-svg"></svg>
               <table id="commits-table">

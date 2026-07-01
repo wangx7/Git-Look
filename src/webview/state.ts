@@ -1,4 +1,4 @@
-import { Commit, CodeStats, WebviewState, RightPaneState, RightPaneStateType, Filters } from './types';
+import { Commit, CodeStats, WebviewState, RightPaneState, RightPaneStateType, Filters, RepoInfo } from './types';
 
 export class StateManager {
   commits: Commit[] = [];
@@ -23,6 +23,8 @@ export class StateManager {
   hasMoreCommits: boolean = true;
   currentPage: number = 0;
   readonly pageSize: number = 150;
+  repos: RepoInfo[] = [];
+  selectedRepoIndex: number = 0;
 
   getRightPaneStateNumber(): number {
     if (this.rightPaneVisible === 0) {
@@ -53,7 +55,9 @@ export class StateManager {
       detailsWidth,
       rightPaneState: this.rightPaneState,
       rightPaneVisible: this.rightPaneVisible,
-      detailsCollapsed: this.rightPaneVisible === 0
+      detailsCollapsed: this.rightPaneVisible === 0,
+      repos: this.repos,
+      selectedRepoIndex: this.selectedRepoIndex
     };
     window.vscode.setState(state);
   }

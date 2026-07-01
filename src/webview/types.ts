@@ -33,6 +33,11 @@ export interface CodeStats {
   topFiles: { path: string; count: number }[];
 }
 
+export interface RepoInfo {
+  root: string;
+  name: string;
+}
+
 export interface Filters {
   branch?: string;
   author?: string;
@@ -55,6 +60,8 @@ export interface WebviewState {
   rightPaneState?: string;
   rightPaneVisible?: number;
   detailsCollapsed?: boolean;
+  repos?: RepoInfo[];
+  selectedRepoIndex?: number;
 }
 
 export const RightPaneState = { 

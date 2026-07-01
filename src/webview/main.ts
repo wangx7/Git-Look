@@ -10,17 +10,32 @@ import { handleRowClick, onRequestVirtualListUpdate } from './commitDetail';
 import { initLayout } from './layout';
 import { initMessageHandler } from './messageHandler';
 import { constants } from './constants';
+import { updateRepoSelector, updateRepoSelectorVisibility } from './repoSelector';
 
 window.vscode = acquireVsCodeApi();
 const vscode = window.vscode;
 
 function init() {
+  // Request repo list from extension host
+  vscode.postMessage({ command: 'getRepos' });
+
   // Init layout and event listeners
   initLayout();
   initFilters(() => reloadData(true));
   initMessageHandler();
   onRightPaneStateChange(saveCurrentState);
   onRequestVirtualListUpdate(updateVirtualList);
+
+  // Repo selector: send switchRepo when user picks a different repo
+  if (elements.repoSelect) {
+    elements.repoSelect.addEventListener('change', () => {
+      const index = parseInt(elements.repoSelect.value, 10);
+      if (!isNaN(index) && index !== state.selectedRepoIndex) {
+        adjustSelectWidth(elements.repoSelect);
+        vscode.postMessage({ command: 'switchRepo', index });
+      }
+    });
+  }
 
   elements.commitsTbody.addEventListener('click', (e) => {
     const row = (e.target as HTMLElement).closest('.commit-row');
@@ -85,6 +100,12 @@ function init() {
     state.selectedCommitHash = previousState.selectedCommitHash || null;
     state.currentPage = previousState.currentPage || 0;
     state.hasMoreCommits = previousState.hasMoreCommits !== undefined ? previousState.hasMoreCommits : true;
+
+    // Restore repo selection
+    state.repos = previousState.repos || [];
+    state.selectedRepoIndex = previousState.selectedRepoIndex ?? 0;
+    updateRepoSelector();
+    updateRepoSelectorVisibility();
 
     if (previousState.rightPaneVisible !== undefined) {
       state.rightPaneVisible = previousState.rightPaneVisible;

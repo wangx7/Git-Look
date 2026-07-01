@@ -12,6 +12,7 @@ import {
   FileLastCommit,
   FileAuthor
 } from './gitHelper';
+import { RepoManager } from './repoManager';
 
 export interface FileHeaderData {
   displayAuthor: string;
@@ -97,10 +98,10 @@ export function buildFileHeaderData(
 export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
   private _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
   public readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
-  private getCwd: () => string | undefined;
+  private repoManager: RepoManager;
 
-  constructor(getCwd: () => string | undefined) {
-    this.getCwd = getCwd;
+  constructor(repoManager: RepoManager) {
+    this.repoManager = repoManager;
   }
 
   public refresh(): void {
@@ -113,15 +114,8 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
     }
 
     const filePath = document.uri.fsPath;
-    const cwd = this.getCwd();
-    if (!cwd) {
-      return [];
-    }
-
-    let gitRoot = cwd;
-    try {
-      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
-    } catch (e) {
+    const gitRoot = this.repoManager.getRepoForFile(document.uri);
+    if (!gitRoot) {
       return [];
     }
 
