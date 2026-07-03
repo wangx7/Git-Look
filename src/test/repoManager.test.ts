@@ -29,9 +29,16 @@ jest.mock('vscode', () => {
   };
 }, { virtual: true });
 
-jest.mock('../gitHelper', () => ({
-  isGitRepository: jest.fn()
-}));
+jest.mock('../gitHelper', () => {
+  const mockIsGit = jest.fn();
+  return {
+    isGitRepository: mockIsGit,
+    getGitRoot: jest.fn(async (p: string) => {
+      const isGit = await mockIsGit(p);
+      return isGit ? p : undefined;
+    })
+  };
+});
 
 describe('RepoManager', () => {
   let manager: RepoManager;

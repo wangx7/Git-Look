@@ -132,6 +132,9 @@ export class BlameAnnotationsManager implements vscode.Disposable {
 
   public clearHighlight(editor: vscode.TextEditor) {
     if (this.currentHighlightDeco) {
+      // Explicitly clear decorations before disposing. Although dispose() removes decorations
+      // automatically, doing it explicitly is safer in multi-editor scenarios.
+      try { editor.setDecorations(this.currentHighlightDeco, []); } catch { /* editor may be closed */ }
       this.currentHighlightDeco.dispose();
       this.currentHighlightDeco = null;
     }

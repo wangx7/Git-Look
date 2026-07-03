@@ -221,7 +221,7 @@ describe('gitHelper', () => {
       });
       (vscode.extensions.getExtension as jest.Mock).mockReturnValue(undefined);
 
-      const uri = { fsPath: '/mock/path/file.ts' } as any;
+      const uri = { fsPath: '/mock/path/file.ts', with: function(changes: any) { return { ...this, ...changes, query: changes.query || '' }; } } as any;
       const result = await toWorkingTreeUri(uri, '/mock/path');
       expect(result.scheme).toBe('git');
       const query = JSON.parse(result.query);
@@ -239,7 +239,7 @@ describe('gitHelper', () => {
       });
       (vscode.extensions.getExtension as jest.Mock).mockReturnValue(undefined);
 
-      const uri = { fsPath: '/mock/path/file.ts' } as any;
+      const uri = { fsPath: '/mock/path/file.ts', with: function(changes: any) { return { ...this, ...changes, query: changes.query || '' }; } } as any;
       const result = await toWorkingTreeUri(uri, '/mock/path');
       expect(result.scheme).toBe('git');
       const query = JSON.parse(result.query);
@@ -256,7 +256,7 @@ describe('gitHelper', () => {
       });
       (vscode.extensions.getExtension as jest.Mock).mockReturnValue(undefined);
 
-      const uri = { fsPath: '/mock/path/file.ts' } as any;
+      const uri = { fsPath: '/mock/path/file.ts', with: function(changes: any) { return { ...this, ...changes, query: changes.query || '' }; } } as any;
       const result = await toWorkingTreeUri(uri, '/mock/path');
       expect(result.scheme).toBe('git');
       const query = JSON.parse(result.query);

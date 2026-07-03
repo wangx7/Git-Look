@@ -64,6 +64,10 @@
       {
         "command": "git-visual.showLineBlame",
         "title": "Git Look: 显示行作者"
+      },
+      {
+        "command": "git-visual.openWorkspaceFile",
+        "title": "Git Look: 打开工作区文件"
       }
     ],
     "submenus": [

@@ -160,6 +160,9 @@ interface InFlightEntry {
   nonAbortableCount: number;
 }
 
+/** 缓存有效期：30 秒。保证外部 git 操作（如命令行 commit、fetch）在合理时间内反映到 UI。 */
+const CACHE_TTL_MS = 30 * 1000;
+
 const inFlightEntries = new Map<string, InFlightEntry>();
 const gitCache = new Map<string, { value: string; timestamp: number }>();
 
@@ -170,9 +173,13 @@ export function clearGitCache() {
 export async function execGit(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
   const cacheKey = cwd + '::' + args.join(' ');
   
-  // Check cache first
-  if (gitCache.has(cacheKey)) {
-    return gitCache.get(cacheKey)!.value;
+  // Check cache first (with TTL)
+  const cached = gitCache.get(cacheKey);
+  if (cached) {
+    if (Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.value;
+    }
+    gitCache.delete(cacheKey); // Expired — remove stale entry
   }
   
   if (signal?.aborted) {
@@ -322,7 +329,9 @@ export async function getBranches(cwd: string): Promise<string[]> {
 
 export async function getAuthors(cwd: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    const output = await execGit(['log', '--all', '-n', '10000', '--pretty=format:%an'], cwd, signal);
+    // No commit count limit: ensures all authors are included for large repositories.
+    // Results are deduplicated via Set, so memory usage stays bounded by unique author count.
+    const output = await execGit(['log', '--all', '--pretty=format:%an'], cwd, signal);
     const authorsSet = new Set<string>();
     output.split('\n').forEach(name => {
       const trimmed = name.trim();

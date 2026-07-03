@@ -9,6 +9,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _abortController?: AbortController;
   private _statsAbortController?: AbortController;
+  private _autoLoadAbortController?: AbortController; // #10: cancel stale auto-load requests
   private blameManager?: any;
   private _currentGitDir?: string;
   private _gitWatcher?: fs.FSWatcher;
@@ -532,6 +533,10 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
                 rightUri = await toGitUri(fileUri, hash);
               }
 
+              // vscode.changes expects [labelUri, leftUri, rightUri]:
+              // - labelUri (index 0): used for the tab title / file name display
+              // - leftUri  (index 1): original (parent/older) side
+              // - rightUri (index 2): modified (newer) side
               return [rightUri, leftUri, rightUri];
             }));
             const title = `${hash.substring(0, 7)} - ${message || ''} (${files.length} 个文件)`;
@@ -683,8 +688,15 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
     const generation = ++this._fileHistoryGeneration;
 
+    // #10: Abort any previous in-flight auto-load request before starting a new one
+    if (this._autoLoadAbortController) {
+      this._autoLoadAbortController.abort();
+    }
+    this._autoLoadAbortController = new AbortController();
+    const signal = this._autoLoadAbortController.signal;
+
     try {
-      const commits = await traceFileHistory(cwd, filePath, startRef);
+      const commits = await traceFileHistory(cwd, filePath, startRef, signal);
       if (generation !== this._fileHistoryGeneration || !this._fileHistoryActive || !this._view) {
         return;
       }
@@ -725,8 +737,11 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           commits: commitsToSend
         });
       }
-    } catch (err) {
-      // Silently ignore auto-load errors
+    } catch (err: any) {
+      if (err.message === 'ABORTED') {
+        return; // Cancelled by a newer request — expected, do not log
+      }
+      // Silently ignore other auto-load errors
     }
   }
 

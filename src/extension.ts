@@ -254,6 +254,15 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   let fileHeaderChangeDebounce: NodeJS.Timeout | undefined;
+  // #5: Register a disposable to clear the debounce timer on deactivation, preventing timer leaks.
+  context.subscriptions.push({
+    dispose: () => {
+      if (fileHeaderChangeDebounce) {
+        clearTimeout(fileHeaderChangeDebounce);
+        fileHeaderChangeDebounce = undefined;
+      }
+    }
+  });
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(() => {
       if (fileHeaderChangeDebounce) {

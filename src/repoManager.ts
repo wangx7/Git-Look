@@ -166,14 +166,19 @@ export class RepoManager implements vscode.Disposable {
    * Used by blame annotations and file header CodeLens.
    */
   getRepoForFile(uri: vscode.Uri): string | undefined {
-    const filePath = uri.fsPath;
-    // Find the repo whose root is the longest prefix of filePath
+    let filePath = uri.fsPath;
+    // Resolve symlinks so that symlinked workspace folders or files are correctly matched.
+    try { filePath = require('fs').realpathSync(filePath); } catch { /* file may not exist yet */ }
+
     let bestRoot: string | undefined;
     for (const repo of this._repos) {
-      const rel = path.relative(repo.root, filePath);
+      let repoRoot = repo.root;
+      try { repoRoot = require('fs').realpathSync(repoRoot); } catch { /* ignore */ }
+
+      const rel = path.relative(repoRoot, filePath);
       if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
-        if (!bestRoot || repo.root.length > bestRoot.length) {
-          bestRoot = repo.root;
+        if (!bestRoot || repoRoot.length > bestRoot.length) {
+          bestRoot = repo.root; // Return the original (non-resolved) root for consistency
         }
       }
     }

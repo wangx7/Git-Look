@@ -277,7 +277,8 @@ describe('GitGraphProvider Diff Logic', () => {
         'vscode.diff',
         expect.anything(),
         expect.objectContaining({ scheme: 'git', query: 'working-tree-mock' }),
-        expect.stringContaining('本地工作区')
+        expect.stringContaining('本地工作区'),
+        expect.anything()
       );
     });
 
@@ -308,7 +309,8 @@ describe('GitGraphProvider Diff Logic', () => {
         'vscode.diff',
         expect.anything(),
         expect.objectContaining({ scheme: 'git', query: 'history-mock' }),
-        expect.not.stringContaining('本地工作区')
+        expect.not.stringContaining('本地工作区'),
+        expect.anything()
       );
     });
   });
