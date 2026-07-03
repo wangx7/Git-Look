@@ -8,7 +8,10 @@ import {
   getFileLastCommit,
   getFileAuthors,
   isFileTracked,
-  clearGitCache
+  clearGitCache,
+  toWorkingTreeUri,
+  suppressWatchRefresh,
+  shouldSkipWatchRefresh
 } from '../gitHelper';
 import * as cp from 'child_process';
 import * as vscode from 'vscode';
@@ -205,5 +208,79 @@ describe('gitHelper', () => {
 
     const tracked = await isFileTracked('/mock/path', 'src/newFile.ts');
     expect(tracked).toBe(false);
+  });
+
+  describe('toWorkingTreeUri', () => {
+    it('should use stash hash when stash create succeeds', async () => {
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('stash') && args.includes('create')) {
+          cb(null, 'stash-abc123def456\n', '');
+        } else {
+          cb(null, '', '');
+        }
+      });
+      (vscode.extensions.getExtension as jest.Mock).mockReturnValue(undefined);
+
+      const uri = { fsPath: '/mock/path/file.ts' } as any;
+      const result = await toWorkingTreeUri(uri, '/mock/path');
+      expect(result.scheme).toBe('git');
+      const query = JSON.parse(result.query);
+      expect(query.ref).toBe('stash-abc123def456');
+      expect(query.path).toBe('/mock/path/file.ts');
+    });
+
+    it('should fallback to HEAD when stash create returns empty', async () => {
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('stash') && args.includes('create')) {
+          cb(null, '', '');
+        } else {
+          cb(null, '', '');
+        }
+      });
+      (vscode.extensions.getExtension as jest.Mock).mockReturnValue(undefined);
+
+      const uri = { fsPath: '/mock/path/file.ts' } as any;
+      const result = await toWorkingTreeUri(uri, '/mock/path');
+      expect(result.scheme).toBe('git');
+      const query = JSON.parse(result.query);
+      expect(query.ref).toBe('HEAD');
+    });
+
+    it('should fallback to HEAD when stash create fails', async () => {
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('stash') && args.includes('create')) {
+          cb(new Error('stash failed'), '', 'error');
+        } else {
+          cb(null, '', '');
+        }
+      });
+      (vscode.extensions.getExtension as jest.Mock).mockReturnValue(undefined);
+
+      const uri = { fsPath: '/mock/path/file.ts' } as any;
+      const result = await toWorkingTreeUri(uri, '/mock/path');
+      expect(result.scheme).toBe('git');
+      const query = JSON.parse(result.query);
+      expect(query.ref).toBe('HEAD');
+    });
+  });
+
+  describe('watch refresh suppression', () => {
+    afterEach(() => {
+      suppressWatchRefresh(-10000);
+    });
+
+    it('shouldSkipWatchRefresh returns false by default', () => {
+      expect(shouldSkipWatchRefresh()).toBe(false);
+    });
+
+    it('suppressWatchRefresh sets a silent window', () => {
+      suppressWatchRefresh(5000);
+      expect(shouldSkipWatchRefresh()).toBe(true);
+    });
+
+    it('shouldSkipWatchRefresh returns false after silent window expires', () => {
+      suppressWatchRefresh(-1000);
+      expect(shouldSkipWatchRefresh()).toBe(false);
+    });
   });
 });

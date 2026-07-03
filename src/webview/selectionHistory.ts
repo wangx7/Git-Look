@@ -37,13 +37,13 @@ export function renderSelectionHistory(filePath, startLine, endLine, historyComm
 
       card.innerHTML = `
           <div class="history-card-header">
-            <span class="history-card-author"><i class="codicon codicon-person"></i> ${escapeHtml(c.author)}</span>
+            <div class="history-card-header-left">
+              <span class="history-card-author"><i class="codicon codicon-person"></i> ${escapeHtml(c.author)}</span>
+              <span class="history-card-hash-badge">${shortHash}</span>
+            </div>
             <span class="history-card-date">${relTime}</span>
           </div>
           <div class="history-card-msg">${escapeHtml(c.message)}</div>
-          <div class="history-card-footer">
-            <span class="history-card-hash"><i class="codicon codicon-git-commit"></i> ${shortHash}</span>
-          </div>
         `;
 
       card.addEventListener('click', () => {

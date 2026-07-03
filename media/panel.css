@@ -2288,6 +2288,28 @@ svg#graph-svg .merge-inner.hovered {
   gap: 8px;
 }
 
+.history-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.history-card-hash-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-muted);
+  background-color: rgba(128, 128, 128, 0.12);
+  padding: 1px 6px;
+  border-radius: 3px;
+  user-select: none;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  font-weight: 400;
+  opacity: 0.8;
+  transition: all var(--transition-fast);
+}
+
 .history-card-author {
   font-weight: 600;
   font-size: 11px;
@@ -2295,11 +2317,16 @@ svg#graph-svg .merge-inner.hovered {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .history-card-date {
   font-size: 10px;
   color: var(--fg-faint);
+  flex-shrink: 0;
 }
 
 .history-card-msg {
@@ -2307,20 +2334,6 @@ svg#graph-svg .merge-inner.hovered {
   color: var(--fg-color);
   line-height: 1.35;
   word-break: break-word;
-}
-
-.history-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--fg-faint);
-  font-family: var(--font-mono);
-  margin-top: 1px;
-}
-
-.history-card-hash {
-  color: var(--accent);
 }
 
 /* ══════════════════════════════════════════════════

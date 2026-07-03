@@ -12,7 +12,7 @@ jest.mock('fs', () => ({
 jest.mock('vscode', () => {
   return {
     Uri: {
-      file: jest.fn((path) => ({ fsPath: path })),
+      file: jest.fn((path) => ({ fsPath: path, scheme: 'file' })),
       from: jest.fn((opts) => opts),
       joinPath: jest.fn((...args) => ({ fsPath: args.join('/') })),
     },
@@ -22,6 +22,8 @@ jest.mock('vscode', () => {
     },
     window: {
       showErrorMessage: jest.fn(),
+      activeTextEditor: undefined,
+      onDidChangeActiveTextEditor: jest.fn(() => ({ dispose: jest.fn() })),
     },
     Range: jest.fn(),
     TextEditorRevealType: { InCenter: 1 }
@@ -31,6 +33,11 @@ jest.mock('vscode', () => {
 jest.mock('../gitHelper', () => ({
   execGit: jest.fn(),
   toGitUri: jest.fn(),
+  toWorkingTreeUri: jest.fn(),
+  suppressWatchRefresh: jest.fn(),
+  shouldSkipWatchRefresh: jest.fn(() => false),
+  hasFileLocalModifications: jest.fn(),
+  traceFileHistory: jest.fn(),
   getCommits: jest.fn(),
   getCommitsUntil: jest.fn(),
   getBranches: jest.fn(),
@@ -174,6 +181,197 @@ describe('GitGraphProvider Diff Logic', () => {
           ])
         ])
       );
+    });
+  });
+
+  describe('openFileHistoryDiff', () => {
+    it('should use toWorkingTreeUri when file has local modifications', async () => {
+      (gitHelper.execGit as jest.Mock).mockImplementation(async (args: any[]) => {
+        if (args && args[0] === 'rev-parse') return '/mock/git/root';
+        return '';
+      });
+      (gitHelper.toGitUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'head-mock' });
+      (gitHelper.toWorkingTreeUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'working-tree-mock' });
+      (gitHelper.hasFileLocalModifications as jest.Mock).mockResolvedValue(true);
+
+      const message = {
+        command: 'openFileHistoryDiff',
+        file: 'src/test.ts',
+        hash: 'abc123',
+        parentHash: 'def456',
+        oldFilePath: null,
+        newFilePath: null
+      };
+
+      const listenerRef = { current: null };
+      provider.resolveWebviewView(createMockWebviewView(listenerRef));
+      await (listenerRef.current as any)(message);
+
+      expect(gitHelper.toWorkingTreeUri).toHaveBeenCalled();
+      expect(gitHelper.suppressWatchRefresh).toHaveBeenCalled();
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'vscode.diff',
+        expect.anything(),
+        expect.objectContaining({ scheme: 'git', query: 'working-tree-mock' }),
+        expect.stringContaining('本地工作区')
+      );
+    });
+
+    it('should use HEAD when file has no local modifications', async () => {
+      (gitHelper.execGit as jest.Mock).mockImplementation(async (args: any[]) => {
+        if (args && args[0] === 'rev-parse') return '/mock/git/root';
+        return '';
+      });
+      (gitHelper.toGitUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'head-mock' });
+      (gitHelper.hasFileLocalModifications as jest.Mock).mockResolvedValue(false);
+
+      const message = {
+        command: 'openFileHistoryDiff',
+        file: 'src/test.ts',
+        hash: 'abc123',
+        parentHash: 'def456',
+        oldFilePath: null,
+        newFilePath: null
+      };
+
+      const listenerRef = { current: null };
+      provider.resolveWebviewView(createMockWebviewView(listenerRef));
+      await (listenerRef.current as any)(message);
+
+      expect(gitHelper.toWorkingTreeUri).not.toHaveBeenCalled();
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'vscode.diff',
+        expect.anything(),
+        expect.objectContaining({ scheme: 'git', query: 'head-mock' }),
+        expect.stringContaining('本地工作区')
+      );
+    });
+  });
+
+  describe('openSingleDiff', () => {
+    it('should use toWorkingTreeUri when hash is HEAD (working tree changes)', async () => {
+      (gitHelper.execGit as jest.Mock).mockImplementation(async (args: any[]) => {
+        if (args && args[0] === 'rev-parse') return '/mock/git/root';
+        return '';
+      });
+      (gitHelper.toGitUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'history-mock' });
+      (gitHelper.toWorkingTreeUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'working-tree-mock' });
+
+      const message = {
+        command: 'openSingleDiff',
+        file: 'src/test.ts',
+        hash: 'HEAD',
+        parentHash: 'def456',
+        oldFilePath: null,
+        newFilePath: null,
+        lineRange: null
+      };
+
+      const listenerRef = { current: null };
+      provider.resolveWebviewView(createMockWebviewView(listenerRef));
+      await (listenerRef.current as any)(message);
+
+      expect(gitHelper.toWorkingTreeUri).toHaveBeenCalled();
+      expect(gitHelper.suppressWatchRefresh).toHaveBeenCalled();
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'vscode.diff',
+        expect.anything(),
+        expect.objectContaining({ scheme: 'git', query: 'working-tree-mock' }),
+        expect.stringContaining('本地工作区')
+      );
+    });
+
+    it('should use normal toGitUri for non-HEAD commits', async () => {
+      (gitHelper.execGit as jest.Mock).mockImplementation(async (args: any[]) => {
+        if (args && args[0] === 'rev-parse') return '/mock/git/root';
+        return '';
+      });
+      (gitHelper.toGitUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'history-mock' });
+
+      const message = {
+        command: 'openSingleDiff',
+        file: 'src/test.ts',
+        hash: 'abc123',
+        parentHash: 'def456',
+        oldFilePath: null,
+        newFilePath: null,
+        lineRange: null
+      };
+
+      const listenerRef = { current: null };
+      provider.resolveWebviewView(createMockWebviewView(listenerRef));
+      await (listenerRef.current as any)(message);
+
+      expect(gitHelper.toWorkingTreeUri).not.toHaveBeenCalled();
+      expect(gitHelper.suppressWatchRefresh).not.toHaveBeenCalled();
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'vscode.diff',
+        expect.anything(),
+        expect.objectContaining({ scheme: 'git', query: 'history-mock' }),
+        expect.not.stringContaining('本地工作区')
+      );
+    });
+  });
+
+  describe('file history auto-switch', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      (gitHelper.traceFileHistory as jest.Mock).mockResolvedValue([
+        { hash: 'abc123', parentHash: 'def456', author: 'test', timestamp: 1624543200, message: 'test commit', oldFilePath: 'src/test.ts', newFilePath: 'src/test.ts' }
+      ]);
+      (gitHelper.hasFileLocalModifications as jest.Mock).mockResolvedValue(false);
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should track file history active state from blameVisibilityChanged', () => {
+      const listenerRef = { current: null };
+      provider.resolveWebviewView(createMockWebviewView(listenerRef));
+
+      (listenerRef.current as any)({ command: 'blameVisibilityChanged', state: 5 });
+      expect((provider as any)._fileHistoryActive).toBe(true);
+
+      (listenerRef.current as any)({ command: 'blameVisibilityChanged', state: 1 });
+      expect((provider as any)._fileHistoryActive).toBe(false);
+    });
+
+    it('should not trigger auto-load when file history is not active', () => {
+      provider.resolveWebviewView(createMockWebviewView({ current: null }));
+      expect((provider as any)._fileHistoryActive).toBe(false);
+
+      (provider as any)._onActiveEditorChanged();
+      jest.advanceTimersByTime(300);
+      expect(gitHelper.traceFileHistory).not.toHaveBeenCalled();
+    });
+
+    it('should skip non-file and git-visual URIs', async () => {
+      const listenerRef = { current: null };
+      const postMessage = jest.fn();
+      provider.resolveWebviewView({
+        onDidDispose: jest.fn(),
+        webview: {
+          onDidReceiveMessage: (listener: any) => { listenerRef.current = listener; },
+          html: '',
+          options: {},
+          postMessage,
+          asWebviewUri: jest.fn(uri => uri)
+        }
+      });
+
+      (listenerRef.current as any)({ command: 'blameVisibilityChanged', state: 5 });
+      (vscode.window.activeTextEditor as any) = {
+        document: {
+          isUntitled: false,
+          uri: { scheme: 'git-visual', fsPath: '/mock/file.ts' }
+        }
+      };
+
+      (provider as any)._onActiveEditorChanged();
+      jest.advanceTimersByTime(300);
+      await Promise.resolve();
+      expect(gitHelper.traceFileHistory).not.toHaveBeenCalled();
     });
   });
 });

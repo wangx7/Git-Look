@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { GitGraphProvider } from './panel/gitGraphProvider';
-import { execGit, traceLineHistory, hasLocalModifications, clearGitCache, traceFileHistory, hasFileLocalModifications, toGitUri } from './gitHelper';
+import { execGit, traceLineHistory, hasLocalModifications, clearGitCache, traceFileHistory, hasFileLocalModifications, toGitUri, toWorkingTreeUri, suppressWatchRefresh } from './gitHelper';
 import { BlameAnnotationsManager } from './blameAnnotations';
 import { FileHeaderCodeLensProvider } from './fileHeaderCodeLens';
 import { RepoManager } from './repoManager';
@@ -283,8 +283,10 @@ export async function activate(context: vscode.ExtensionContext) {
     try {
       if (diffKind === 'workingTree') {
         const leftUri = await toGitUri(fileUri, 'HEAD');
+        suppressWatchRefresh();
+        const rightUri = await toWorkingTreeUri(fileUri, gitRoot);
         const title = `${path.basename(filePath)} (HEAD vs 工作区)`;
-        await vscode.commands.executeCommand('vscode.diff', leftUri, fileUri, title);
+        await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
       } else if (hash) {
         const parentHash = (await execGit(['log', '-1', '--pretty=%P', hash], gitRoot)).trim().split(' ')[0];
         const emptyUri = vscode.Uri.from({ scheme: 'git-visual', path: filePath });

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri } from '../gitHelper';
+import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri, toWorkingTreeUri, suppressWatchRefresh, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory } from '../gitHelper';
 import { RepoManager } from '../repoManager';
 
 export class GitGraphProvider implements vscode.WebviewViewProvider {
@@ -13,6 +13,9 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _currentGitDir?: string;
   private _gitWatcher?: fs.FSWatcher;
   private _debounceTimer?: NodeJS.Timeout;
+  private _fileHistoryAutoTimer?: NodeJS.Timeout;
+  private _fileHistoryActive = false;
+  private _fileHistoryGeneration = 0;
   private _repoDisposables: vscode.Disposable[] = [];
 
   public showFileBlameStats(fileName: string, stats: { author: string; lines: number }[]) {
@@ -53,6 +56,11 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidDispose(() => {
       this._disposeGitWatcher();
+      if (this._fileHistoryAutoTimer) {
+        clearTimeout(this._fileHistoryAutoTimer);
+        this._fileHistoryAutoTimer = undefined;
+      }
+      this._fileHistoryActive = false;
       this._repoDisposables.forEach(d => { try { d.dispose(); } catch { /* ignore */ } });
       this._repoDisposables = [];
     });
@@ -74,6 +82,13 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     );
     this._repoDisposables.push(
       this._repoManager.onDidChangeSelection(() => this._sendReposToWebview(true))
+    );
+
+    // Listen for active editor changes to auto-switch file history
+    this._repoDisposables.push(
+      vscode.window.onDidChangeActiveTextEditor(() => {
+        this._onActiveEditorChanged();
+      })
     );
 
     webviewView.webview.onDidReceiveMessage(async (data) => {
@@ -333,13 +348,18 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           let parentHash = data.parentHash;
 
           const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
+          const isWorkingTree = hash === 'HEAD';
 
           let rightUri: vscode.Uri;
           let leftUri: vscode.Uri;
 
           // If we have exact historic paths from git log -L parsing, use them directly!
           // This is highly optimized and perfectly handles file renames.
-          if (newFilePath) {
+          if (isWorkingTree) {
+            // 工作区未提交修改：使用 stash create 获取真实内容，同时保留 git 行信息
+            suppressWatchRefresh();
+            rightUri = await toWorkingTreeUri(vscode.Uri.file(absoluteFilePath), gitRoot);
+          } else if (newFilePath) {
             try {
               await execGit(['cat-file', '-e', `${hash}:${newFilePath}`], gitRoot);
               const newAbsPath = path.join(gitRoot, newFilePath);
@@ -398,7 +418,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             }
           }
 
-          const title = `${path.basename(file)} (${(resolvedParentHash && resolvedParentHash !== 'empty') ? resolvedParentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
+          const rightLabel = isWorkingTree ? '本地工作区' : hash.substring(0, 7);
+          const title = `${path.basename(file)} (${(resolvedParentHash && resolvedParentHash !== 'empty') ? resolvedParentHash.substring(0, 7) : 'empty'} vs ${rightLabel})`;
 
           let options: vscode.TextDocumentShowOptions = {};
           if (lineRange) {
@@ -418,28 +439,35 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           const absoluteFilePath = path.join(gitRoot, relativeFilePath);
 
           let leftUri: vscode.Uri;
-          // For renamed files, use oldFilePath to look up in parent commit
-          const relativeTargetPath = oldFilePath || newFilePath || relativeFilePath;
-
-          if (!parentHash || parentHash === 'empty') {
-            leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-          } else {
+          // Left side: the historical commit user selected
+          const relativeHistPath = oldFilePath || newFilePath || relativeFilePath;
+          try {
+            await execGit(['cat-file', '-e', `${hash}:${relativeHistPath}`], gitRoot);
+            leftUri = await toGitUri(vscode.Uri.file(path.join(gitRoot, relativeHistPath)), hash);
+          } catch (e) {
             try {
-              await execGit(['cat-file', '-e', `${parentHash}:${relativeTargetPath}`], gitRoot);
-              leftUri = await toGitUri(vscode.Uri.file(path.join(gitRoot, relativeTargetPath)), parentHash);
-            } catch (e) {
-              // Fallback: try with current file path if old path doesn't exist
-              try {
-                await execGit(['cat-file', '-e', `${parentHash}:${relativeFilePath}`], gitRoot);
-                leftUri = await toGitUri(vscode.Uri.file(absoluteFilePath), parentHash);
-              } catch (e2) {
-                leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-              }
+              await execGit(['cat-file', '-e', `${hash}:${relativeFilePath}`], gitRoot);
+              leftUri = await toGitUri(vscode.Uri.file(absoluteFilePath), hash);
+            } catch (e2) {
+              leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
             }
           }
 
-          const rightUri = vscode.Uri.file(absoluteFilePath);
-          const title = `${path.basename(relativeFilePath)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs 本地工作区)`;
+          // Right side: current working tree (latest local changes, fallback to HEAD if no uncommitted changes)
+          let rightUri: vscode.Uri;
+          try {
+            const hasLocalMod = await hasFileLocalModifications(gitRoot, absoluteFilePath);
+            if (hasLocalMod) {
+              suppressWatchRefresh();
+              rightUri = await toWorkingTreeUri(vscode.Uri.file(absoluteFilePath), gitRoot);
+            } else {
+              rightUri = await toGitUri(vscode.Uri.file(absoluteFilePath), 'HEAD');
+            }
+          } catch (e) {
+            rightUri = await toGitUri(vscode.Uri.file(absoluteFilePath), 'HEAD');
+          }
+
+          const title = `${path.basename(relativeFilePath)} (${hash.substring(0, 7)} vs 本地工作区)`;
 
           await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
           break;
@@ -531,6 +559,13 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           if (data.state !== 4 && this.blameManager) {
             this.blameManager.turnOff();
           }
+          // state === 5 means file history pane is visible
+          const wasActive = this._fileHistoryActive;
+          this._fileHistoryActive = (data.state === 5);
+          // When file history becomes active, immediately load current file
+          if (!wasActive && this._fileHistoryActive) {
+            this._onActiveEditorChanged();
+          }
           break;
         }
       }
@@ -590,6 +625,108 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         filePath: data.filePath,
         commits: data.commits
       });
+    }
+  }
+
+  private _onActiveEditorChanged() {
+    if (!this._fileHistoryActive) {
+      return;
+    }
+    if (this._fileHistoryAutoTimer) {
+      clearTimeout(this._fileHistoryAutoTimer);
+    }
+    this._fileHistoryAutoTimer = setTimeout(() => {
+      this._autoLoadFileHistory();
+    }, 200);
+  }
+
+  private async _autoLoadFileHistory() {
+    if (!this._fileHistoryActive || !this._view) {
+      return;
+    }
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      return;
+    }
+    const document = editor.document;
+    if (document.isUntitled) {
+      return;
+    }
+
+    let filePath = document.uri.fsPath;
+    let startRef: string | undefined;
+
+    if (document.uri.scheme === 'git') {
+      try {
+        const queryObj = JSON.parse(document.uri.query);
+        if (queryObj.path) {
+          filePath = queryObj.path;
+        }
+      } catch (e) {
+        // Ignore
+      }
+    } else if (document.uri.scheme === 'git-visual') {
+      return;
+    } else if (document.uri.scheme !== 'file') {
+      return;
+    }
+
+    const gitRoot = this._repoManager.getSelectedRoot();
+    if (!gitRoot) {
+      return;
+    }
+
+    const cwd = this._repoManager.getRepoForFile(vscode.Uri.file(filePath));
+    if (!cwd || cwd !== gitRoot) {
+      return;
+    }
+
+    const generation = ++this._fileHistoryGeneration;
+
+    try {
+      const commits = await traceFileHistory(cwd, filePath, startRef);
+      if (generation !== this._fileHistoryGeneration || !this._fileHistoryActive || !this._view) {
+        return;
+      }
+      const repoFilePath = path.relative(cwd, filePath).replace(/\\/g, '/');
+      const hasLocalChanges = await hasFileLocalModifications(cwd, filePath);
+
+      if (generation !== this._fileHistoryGeneration || !this._fileHistoryActive || !this._view) {
+        return;
+      }
+
+      const commitsToSend = commits.map((c: any) => ({
+        hash: c.hash,
+        parentHash: c.parentHash,
+        author: c.author,
+        timestamp: c.timestamp,
+        message: c.message,
+        oldFilePath: c.oldFilePath,
+        newFilePath: c.newFilePath
+      }));
+
+      if (hasLocalChanges) {
+        const latestRef = commits[0]?.hash ?? 'HEAD';
+        commitsToSend.unshift({
+          hash: 'HEAD',
+          parentHash: latestRef,
+          author: '工作区未提交更改',
+          timestamp: Math.floor(Date.now() / 1000),
+          message: '未提交的修改',
+          oldFilePath: repoFilePath,
+          newFilePath: repoFilePath
+        });
+      }
+
+      if (this._view && generation === this._fileHistoryGeneration) {
+        this._view.webview.postMessage({
+          type: 'showFileHistory',
+          filePath: repoFilePath,
+          commits: commitsToSend
+        });
+      }
+    } catch (err) {
+      // Silently ignore auto-load errors
     }
   }
 
@@ -669,10 +806,16 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   }
 
   private _triggerDebouncedRefresh() {
+    if (shouldSkipWatchRefresh()) {
+      return;
+    }
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
     }
     this._debounceTimer = setTimeout(() => {
+      if (shouldSkipWatchRefresh()) {
+        return;
+      }
       console.log('[Git 可视化] Git change detected, refreshing graph...');
       clearGitCache();
       this.refresh();

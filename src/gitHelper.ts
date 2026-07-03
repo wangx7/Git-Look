@@ -122,6 +122,37 @@ export async function toGitUri(uri: vscode.Uri, ref: string): Promise<vscode.Uri
   });
 }
 
+/**
+ * 创建指向工作区实际内容（含未提交修改）的 git:// URI
+ * 使用 git stash create 创建临时 commit 来反映工作区状态，不会修改用户工作区/暂存区
+ * 注意：git stash create 会短暂修改 .git/index，可能触发文件监听刷新，调用方需配合 skipNextWatchRefresh 使用
+ */
+export async function toWorkingTreeUri(uri: vscode.Uri, cwd: string): Promise<vscode.Uri> {
+  let ref = 'HEAD';
+  try {
+    const stashHash = (await execGit(['stash', 'create'], cwd)).trim();
+    if (stashHash) {
+      ref = stashHash;
+    }
+  } catch (e) {
+    // fallback to HEAD
+  }
+  return toGitUri(uri, ref);
+}
+
+/** 全局静默截止时间戳，git stash create 会短暂修改 .git/index 触发监听，此时间前跳过自动刷新 */
+export let watchRefreshSilentUntil = 0;
+
+/** 调用 git stash create 前设置，防止触发不必要的面板刷新 */
+export function suppressWatchRefresh(ms = 2000) {
+  watchRefreshSilentUntil = Date.now() + ms;
+}
+
+/** 检查是否应该跳过当前的 watch 刷新 */
+export function shouldSkipWatchRefresh(): boolean {
+  return Date.now() < watchRefreshSilentUntil;
+}
+
 interface InFlightEntry {
   promise: Promise<string>;
   signals: Set<AbortSignal>;
