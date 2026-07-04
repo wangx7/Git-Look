@@ -1,16 +1,16 @@
 export const colors = [
-  '#3b82f6', // modern blue
-  '#10b981', // emerald green
-  '#f59e0b', // amber yellow
-  '#8b5cf6', // violet purple
-  '#ec4899', // pink
-  '#06b6d4', // cyan
-  '#f97316', // orange
-  '#14b8a6', // teal
-  '#a855f7', // purple
-  '#84cc16', // lime
-  '#6366f1', // indigo
-  '#ef4444'  // red
+  '#d4a373', // 黄河沙金 (Yellow River Silt Gold)
+  '#b83b3b', // 碱蓬红毯 (Suaeda Crimson)
+  '#2a9d8f', // 潮沟青碧 (Tidal Creek Teal)
+  '#1b4965', // 渤海深蓝 (Bohai Deep Blue)
+  '#824c96', // 滩涂晚霞紫 (Mudflat Dusk Purple)
+  '#52796f', // 芦苇绿 (Reed Marsh Green)
+  '#e76f51', // 晚霞橙 (Sunset Orange)
+  '#457b9d', // 潮汐溪流蓝 (Tidal Creek Sky Blue)
+  '#a87c55', // 滩涂褐 (Mudflat Sand)
+  '#b54d32', // 泥沙红 (Silt Terracotta)
+  '#264653', // 深海黛 (Sea Midnight Navy)
+  '#98b06c'  // 碱蓬绿 (Suaeda Spring Green)
 ];
 
 export function getRelativeTime(timestamp: number): string {

@@ -1,20 +1,29 @@
-# Git Look - Git 可视化
+# Git 潮汐树 (Git Tidal Tree) - Git 可视化
 
-一个专注于 Git 历史信息检索与溯源的 VS Code 插件。
+**🌊 潮汐树（Tidal Tree）是自然界在黄河入海口滩涂上雕刻出的血管般潮汐通道。而 Git 的分支演进与合并，正是软件开发历程中自然生长出的潮汐树。**
 
-[![Version](https://img.shields.io/visual-studio-marketplace/v/wangx123.git-visual?style=flat-square&color=blue)](https://marketplace.visualstudio.com/items?itemName=wangx123.git-visual)
-[![License](https://img.shields.io/github/license/wangx7/Git-Look?style=flat-square&color=green)](https://github.com/wangx7/Git-Look/blob/main/LICENSE)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/wangx123.git-visual?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=wangx123.git-visual)
+---
 
-> **💡 Git 可视化核心理念：只检索查看，不更改工作区，让代码溯源与审查更纯粹、安全。**
+## 🖼️ 视觉效果预览
+
+<video src="./media/video.mp4" width="100%" controls autoplay loop muted></video>
+
+## 🎨 视觉品牌：潮汐配色 (Tidal Palette)
+
+本插件内置了基于黄河口河海交汇自然风景的调色盘：
+
+- **黄河沙金 (Yellow River Silt Gold)**: 象征母亲河亿万吨沙土沉淀出的温润沙金滩涂。
+- **碱蓬红毯 (Suaeda Crimson)**: 象征红滩湿地连绵不绝的红色碱蓬草。
+- **潮沟青碧 (Tidal Creek Teal)**: 象征清澈的潮汐水道折射的碧空。
+- **渤海深蓝 (Bohai Deep Blue)**: 象征河口之外宽广深邃的碧海深流。
 
 ---
 
 ## 🚀 核心功能
 
-### 1. 📂 Git 潮汐树 (Tidal Tree)
+### 1. 📂 Git 潮汐树 (Tidal Tree Graph)
 
-- **分支演进树**：提供清晰直观的全局分支合并与演进拓扑图。
+- **分支演进树**：提供清晰直观的全局分支合并与演进拓扑图，分支配色基于黄河口自然色系渲染。
 - **多维检索**：支持按分支、作者、日期区间、提交哈希或 Message 关键字等进行多重组合筛选。
 - **详尽详情面板**：点击提交记录即可查看详细元数据及受影响的文件列表，支持单键快速打开 Diff 视图查看文件变更。
 - **数据统计**：集成了贡献度排行榜、每日提交活跃度趋势图（SVG 曲线）以及变更最频繁的 Top 文件分析。
@@ -27,19 +36,19 @@
 
 ### 3. 🔍 选区历史溯源 (Selection History)
 
-- **代码块追踪**：在编辑器中选中任意一行或多行代码，右键选择 `Git Look -> Git 选区历史`。
-- **时序演进**：插件会自动定位并过滤出仅对该代码段产生过修改的提交时间轴，助您迅速锁定“最初创建者”或“关键修改引入者”。
+- **代码块追踪**：在编辑器中选中任意一行或多行代码，右键选择 `Git 潮汐树 -> Git 选区历史`。
+- **时序演进**：插件会自动定位并过滤出仅对该代码段产生过修改的提交时间轴，助您迅速锁定最初引入者或关键修改人。
 
 ### 4. 🗂️ 文件历史追溯 (File History)
 
-- **全历史一览**：在当前打开的文件中右键选择 `Git Look -> Git 文件历史`，即可在右侧面板展示该文件的完整提交记录。
+- **全历史一览**：在当前打开的文件中右键选择 `Git 潮汐树 -> Git 文件历史`，即可在右侧面板展示该文件的完整提交记录。
 - **历史对比**：支持将任意历史版本的文件与当前本地文件进行 Side-by-Side 差异对比（Diff），清晰洞察代码演进细节。
 
 ### 5. 📌 文件头部 Git 信息 (File Header)
 
 - **一眼即达**：在文件顶部显示最后提交作者、提交时间以及该文件历史贡献者数量。
 - **快速溯源**：点击作者信息可打开当前文件上一次提交对比；点击作者数量可查看文件历史列表。
-- **未提交适配**：文件存在未保存或未提交改动时，自动标识当前用户为“你”，无需困惑。
+- **未提交适配**：文件存在未保存或未提交改动时，自动标识当前用户为“你”。
 
 ---
 
@@ -51,26 +60,20 @@
 
 ### 2. 文件头部 Git 信息
 
-打开任意 Git 追踪的文件，顶部会自动出现一行轻量 Git 信息。点击左侧的 **作者/日期** 可直接对比上一次提交，点击右侧的 **作者数量** 可打开完整文件历史。若不需要，可通过右键菜单 `Git Look -> Git 文件头部` 一键隐藏。
+打开任意 Git 追踪的文件，顶部会自动出现一行轻量 Git 信息。点击左侧的 **作者/日期** 可直接对比上一次提交，点击右侧的 **作者数量** 可打开完整文件历史。若不需要，可通过右键菜单 `Git 潮汐树 -> Git 文件头部` 一键隐藏。
 
 ### 3. 右键便捷菜单
 
-在编辑器中点击右键，即可在上下文菜单的 **`Git Look`** 子菜单下找到所有快捷命令：
+在编辑器中点击右键，即可在上下文菜单的 **`Git 潮汐树`** 子菜单下找到所有快捷命令：
 
 ```
 右键菜单 (Context Menu)
- └── 🔍 Git Look
-      ├── � Git 文件头部 (切换文件顶部 Git 信息)
-      ├── �� Git 行作者 (切换行内 blame 提示)
+ └── 🔍 Git 潮汐树
+      ├── 📄 Git 文件头部 (切换文件顶部 Git 信息)
+      ├── ✍️ Git 行作者 (切换行内 blame 提示)
       ├── 🕒 Git 选区历史 (追踪选中代码块的时序演进)
-      └── 📄 Git 文件历史 (查看当前文件提交记录并对比 diff)
+      └── 🗂️ Git 文件历史 (查看当前文件提交记录并对比 diff)
 ```
-
----
-
-## 🎨 视觉效果预览
-
-![示意图](./media/image.png)
 
 ---
 
