@@ -333,12 +333,6 @@ body {
   color: var(--fg-color);
 }
 
-#toggle-details-btn.active,
-.main-layout.right-pane-hidden #toggle-details-btn {
-  color: var(--fg-color);
-  background-color: var(--row-hover-bg);
-}
-
 /* ── Repo selector ──────────────────────────────── */
 .repo-selector-group {
   border-color: var(--accent-dim);
@@ -2199,12 +2193,12 @@ svg#graph-svg .merge-inner.hovered {
 /* filter-bar 整体压缩：更小间距 + 更低高度 */
 .left-pane.pane-medium .filter-bar {
   gap: 4px;
-  padding: 4px 8px;
+  padding: 0 8px 4px 8px;
 }
 
 .left-pane.pane-medium .filter-group {
   padding: 0 7px;
-  height: 24px;
+  height: 22px;
 }
 
 /* select/input 宽度压到最小 */
@@ -2220,7 +2214,7 @@ svg#graph-svg .merge-inner.hovered {
 .left-pane.pane-medium #reset-btn {
   padding: 0 6px;
   min-width: 24px;
-  height: 24px;
+  height: 26px;
 }
 
 /* ── Compact (< 320px)：在 medium 基础上进一步收紧 ── */
@@ -2252,13 +2246,13 @@ svg#graph-svg .merge-inner.hovered {
 
 .left-pane.pane-compact .filter-bar {
   gap: 3px;
-  padding: 3px 6px;
+  padding: 0 6px 4px 6px;
 }
 
 .left-pane.pane-compact #reset-btn {
   padding: 0 5px;
   min-width: 22px;
-  height: 22px;
+  height: 26px;
 }
 
 /* ── Narrow (< 220px) ───────────────────────────── */
@@ -2337,10 +2331,7 @@ svg#graph-svg .merge-inner.hovered {
 
 
 /* ── filter-bar 窄屏样式 ──────────────── */
-.main-layout.layout-narrow .filter-bar {
-  padding: 5px 8px;
-  gap: 4px;
-}
+
 
 .main-layout.layout-narrow .filter-bar #reset-btn span {
   display: none;

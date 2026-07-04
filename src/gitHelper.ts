@@ -218,6 +218,20 @@ export async function execGit(args: string[], cwd: string, signal?: AbortSignal)
     inFlightEntries.set(cacheKey, entry);
     
     promise.then(result => {
+      if (gitCache.size >= 500) {
+        const now = Date.now();
+        for (const [k, v] of gitCache.entries()) {
+          if (now - v.timestamp >= CACHE_TTL_MS) {
+            gitCache.delete(k);
+          }
+        }
+        if (gitCache.size >= 500) {
+          const firstKey = gitCache.keys().next().value;
+          if (firstKey) {
+            gitCache.delete(firstKey);
+          }
+        }
+      }
       gitCache.set(cacheKey, { value: result, timestamp: Date.now() });
     }).catch(() => {
       // Don't cache errors

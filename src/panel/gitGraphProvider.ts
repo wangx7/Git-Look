@@ -12,7 +12,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _autoLoadAbortController?: AbortController; // #10: cancel stale auto-load requests
   private blameManager?: any;
   private _currentGitDir?: string;
-  private _gitWatcher?: fs.FSWatcher;
+  private _gitWatcher?: vscode.FileSystemWatcher;
   private _debounceTimer?: NodeJS.Timeout;
   private _fileHistoryAutoTimer?: NodeJS.Timeout;
   private _fileHistoryActive = false;
@@ -790,39 +790,14 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
       console.log(`[Git 可视化] Starting watcher for Git directory: ${gitDir}`);
 
       try {
-        this._gitWatcher = fs.watch(gitDir, { recursive: true }, (eventType, filename) => {
-          if (filename) {
-            const normalized = filename.replace(/\\/g, '/');
-            if (normalized === 'HEAD' || normalized === 'index' || normalized.startsWith('refs/')) {
-              this._triggerDebouncedRefresh();
-            }
-          } else {
-            this._triggerDebouncedRefresh();
-          }
-        });
+        const pattern = new vscode.RelativePattern(gitDir, '{HEAD,index,refs/**}');
+        this._gitWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+        
+        this._gitWatcher.onDidChange(() => this._triggerDebouncedRefresh());
+        this._gitWatcher.onDidCreate(() => this._triggerDebouncedRefresh());
+        this._gitWatcher.onDidDelete(() => this._triggerDebouncedRefresh());
       } catch (err) {
-        console.warn('[Git 可视化] Recursive fs.watch failed, falling back to non-recursive watches:', err);
-        const watchers: fs.FSWatcher[] = [];
-        const filesToWatch = ['HEAD', 'index'];
-        for (const file of filesToWatch) {
-          const filePath = path.join(gitDir, file);
-          if (fs.existsSync(filePath)) {
-            try {
-              watchers.push(fs.watch(filePath, () => this._triggerDebouncedRefresh()));
-            } catch (e) { }
-          }
-        }
-        const refsPath = path.join(gitDir, 'refs');
-        if (fs.existsSync(refsPath)) {
-          try {
-            watchers.push(fs.watch(refsPath, () => this._triggerDebouncedRefresh()));
-          } catch (e) { }
-        }
-        this._gitWatcher = {
-          close: () => {
-            watchers.forEach(w => w.close());
-          }
-        } as any;
+        console.error('[Git 可视化] Error creating FileSystemWatcher:', err);
       }
     } catch (e) {
       console.error('[Git 可视化] Error setting up Git watcher:', e);
@@ -849,7 +824,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _disposeGitWatcher() {
     if (this._gitWatcher) {
       try {
-        this._gitWatcher.close();
+        this._gitWatcher.dispose();
       } catch (e) { }
       this._gitWatcher = undefined;
     }
