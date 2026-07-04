@@ -11,7 +11,8 @@ import {
   clearGitCache,
   toWorkingTreeUri,
   suppressWatchRefresh,
-  shouldSkipWatchRefresh
+  shouldSkipWatchRefresh,
+  getCodeStats
 } from '../gitHelper';
 import * as cp from 'child_process';
 import * as vscode from 'vscode';
@@ -281,6 +282,86 @@ describe('gitHelper', () => {
     it('shouldSkipWatchRefresh returns false after silent window expires', () => {
       suppressWatchRefresh(-1000);
       expect(shouldSkipWatchRefresh()).toBe(false);
+    });
+  });
+
+  describe('getCodeStats hourlyActivity', () => {
+    // Build a unix timestamp for a given local date + hour
+    function makeTs(dateStr: string, hour: number): number {
+      const d = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:30:00`);
+      return Math.floor(d.getTime() / 1000);
+    }
+
+    it('should return 24-bucket hourlyActivity when sinceDate === untilDate', async () => {
+      const date = '2026-07-04';
+      const ts9  = makeTs(date, 9);
+      const ts14 = makeTs(date, 14);
+      const mockOutput = [
+        `COMMIT_STAT|aaa|wangx|wangx@test.com|${ts9}`,
+        '2\t1\tsrc/file.ts',
+        `COMMIT_STAT|bbb|jiapengyan|jp@test.com|${ts9}`,
+        '1\t0\tsrc/file.ts',
+        `COMMIT_STAT|ccc|wangx|wangx@test.com|${ts14}`,
+        '3\t2\tsrc/other.ts',
+      ].join('\n');
+
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('log')) { cb(null, mockOutput, ''); }
+        else if (args.includes('rev-parse')) { cb(null, '/usr/bin/git\n', ''); }
+        else { cb(null, '', ''); }
+      });
+
+      const stats = await getCodeStats('/mock/path', { since: date, until: date });
+
+      // Should produce exactly 24 buckets
+      expect(stats.hourlyActivity).not.toBeNull();
+      expect(stats.hourlyActivity!.length).toBe(24);
+
+      // Labels are formatted correctly
+      expect(stats.hourlyActivity![0].label).toBe('00:00');
+      expect(stats.hourlyActivity![9].label).toBe('09:00');
+      expect(stats.hourlyActivity![23].label).toBe('23:00');
+
+      // Counts match commits
+      expect(stats.hourlyActivity![9].count).toBe(2);   // wangx + jiapengyan
+      expect(stats.hourlyActivity![14].count).toBe(1);  // wangx
+      expect(stats.hourlyActivity![0].count).toBe(0);   // empty hour
+    });
+
+    it('should return hourlyActivity as null when sinceDate !== untilDate', async () => {
+      const mockOutput = [
+        `COMMIT_STAT|aaa|wangx|wangx@test.com|${makeTs('2026-07-01', 10)}`,
+        '1\t0\tsrc/a.ts',
+        `COMMIT_STAT|bbb|wangx|wangx@test.com|${makeTs('2026-07-02', 11)}`,
+        '1\t0\tsrc/b.ts',
+      ].join('\n');
+
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('log')) { cb(null, mockOutput, ''); }
+        else if (args.includes('rev-parse')) { cb(null, '/usr/bin/git\n', ''); }
+        else { cb(null, '', ''); }
+      });
+
+      const stats = await getCodeStats('/mock/path', { since: '2026-07-01', until: '2026-07-02' });
+
+      expect(stats.hourlyActivity).toBeNull();
+      expect(stats.dailyActivity.length).toBe(2);
+    });
+
+    it('should return all-zero hourly buckets when no commits on that day', async () => {
+      const date = '2026-07-04';
+
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('log')) { cb(null, '', ''); }
+        else if (args.includes('rev-parse')) { cb(null, '/usr/bin/git\n', ''); }
+        else { cb(null, '', ''); }
+      });
+
+      const stats = await getCodeStats('/mock/path', { since: date, until: date });
+
+      expect(stats.hourlyActivity).not.toBeNull();
+      expect(stats.hourlyActivity!.length).toBe(24);
+      expect(stats.hourlyActivity!.every(h => h.count === 0)).toBe(true);
     });
   });
 });

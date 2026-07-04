@@ -20,6 +20,10 @@ jest.mock('./dom', () => {
       toggle: jest.fn(),
       contains: jest.fn(() => false)
     };
+    const parentClassList = {
+      add: jest.fn(),
+      remove: jest.fn()
+    };
     return {
       classList,
       options,
@@ -29,15 +33,25 @@ jest.mock('./dom', () => {
       addEventListener: jest.fn(),
       appendChild: jest.fn(),
       style: {},
-      dataset: {}
+      dataset: {},
+      parentElement: {
+        classList: parentClassList
+      }
     };
   };
 
   const mockInput = () => {
+    const parentClassList = {
+      add: jest.fn(),
+      remove: jest.fn()
+    };
     return {
       value: '',
       style: {},
-      addEventListener: jest.fn()
+      addEventListener: jest.fn(),
+      parentElement: {
+        classList: parentClassList
+      }
     };
   };
 
@@ -127,6 +141,28 @@ describe('filters', () => {
     updateFilterControls();
     expect(elements.branchSelect.innerHTML).toContain('分支');
     expect(elements.authorSelect.innerHTML).toContain('作者');
+  });
+
+  it('should add is-empty class to select parent if value is empty', () => {
+    const { elements } = require('./dom');
+    elements.branchSelect.value = '';
+    adjustSelectWidth(elements.branchSelect as any);
+    expect(elements.branchSelect.parentElement.classList.add).toHaveBeenCalledWith('is-empty');
+
+    elements.branchSelect.value = 'main';
+    adjustSelectWidth(elements.branchSelect as any);
+    expect(elements.branchSelect.parentElement.classList.remove).toHaveBeenCalledWith('is-empty');
+  });
+
+  it('should add/remove has-value class to search input parent based on value', () => {
+    const { elements } = require('./dom');
+    elements.searchInput.value = '';
+    updateSelectWidths();
+    expect(elements.searchInput.parentElement.classList.remove).toHaveBeenCalledWith('has-value');
+
+    elements.searchInput.value = 'test query';
+    updateSelectWidths();
+    expect(elements.searchInput.parentElement.classList.add).toHaveBeenCalledWith('has-value');
   });
 
   it('should bind change and click events on initFilters', () => {

@@ -7,43 +7,33 @@ export function checkBlameState() {
   window.vscode.postMessage({ command: 'blameVisibilityChanged', state: stateNum });
 }
 
+// Map each pane state to its corresponding element getter
+const paneElementMap: Record<string, () => HTMLElement | null> = {
+  [RightPaneState.LOADING]:          () => elements.detailsPlaceholder,
+  [RightPaneState.OVERVIEW]:         () => elements.overviewStats,
+  [RightPaneState.COMMIT]:           () => elements.detailsContent,
+  [RightPaneState.AUTHOR]:           () => elements.authorStatsPane,
+  [RightPaneState.HISTORY]:          () => elements.selectionHistoryEl,
+  [RightPaneState.FILE_HISTORY]:     () => elements.fileHistoryEl,
+  [RightPaneState.FILE_BLAME_STATS]: () => document.getElementById('file-blame-stats'),
+};
+
+// All pane elements that need to be hidden when switching
+function getAllPaneElements(): (HTMLElement | null)[] {
+  return Object.values(paneElementMap).map(getter => getter());
+}
+
 export function setRightPane(paneState: any) {
   state.rightPaneState = paneState;
-  elements.overviewStats.classList.add('hidden');
-  elements.detailsContent.classList.add('hidden');
-  elements.authorStatsPane.classList.add('hidden');
-  elements.detailsPlaceholder.classList.add('hidden');
-  if (elements.selectionHistoryEl) {
-    elements.selectionHistoryEl.classList.add('hidden');
-  }
-  if (elements.fileHistoryEl) {
-    elements.fileHistoryEl.classList.add('hidden');
-  }
-  const fileBlameStatsEl = document.getElementById('file-blame-stats');
-  if (fileBlameStatsEl) {
-    fileBlameStatsEl.classList.add('hidden');
-  }
 
-  if (paneState === RightPaneState.LOADING) {
-    elements.detailsPlaceholder.classList.remove('hidden');
-  } else if (paneState === RightPaneState.OVERVIEW) {
-    elements.overviewStats.classList.remove('hidden');
-  } else if (paneState === RightPaneState.COMMIT) {
-    elements.detailsContent.classList.remove('hidden');
-  } else if (paneState === RightPaneState.AUTHOR) {
-    elements.authorStatsPane.classList.remove('hidden');
-  } else if (paneState === RightPaneState.HISTORY) {
-    if (elements.selectionHistoryEl) {
-      elements.selectionHistoryEl.classList.remove('hidden');
-    }
-  } else if (paneState === RightPaneState.FILE_HISTORY) {
-    if (elements.fileHistoryEl) {
-      elements.fileHistoryEl.classList.remove('hidden');
-    }
-  } else if (paneState === RightPaneState.FILE_BLAME_STATS) {
-    if (fileBlameStatsEl) {
-      fileBlameStatsEl.classList.remove('hidden');
-    }
+  // Hide all pane elements
+  getAllPaneElements().forEach(el => el?.classList.add('hidden'));
+
+  // Show the target pane element
+  const getter = paneElementMap[paneState];
+  if (getter) {
+    const el = getter();
+    el?.classList.remove('hidden');
   }
 
   // Auto-expand when a view is activated (except for loading)
@@ -57,6 +47,20 @@ export function setRightPane(paneState: any) {
 export function updateDetailsCollapseUI() {
   if (elements.mainLayoutEl) {
     elements.mainLayoutEl.classList.toggle('details-collapsed', state.rightPaneVisible === 0);
+    elements.mainLayoutEl.classList.toggle('right-pane-hidden', state.rightPaneVisible === 0);
+    if (elements.toggleDetailsBtn) {
+      const iconEl = elements.toggleDetailsBtn.querySelector('i');
+      elements.toggleDetailsBtn.classList.toggle('active', state.rightPaneVisible === 0);
+      if (state.rightPaneVisible === 0) {
+        // Panel hidden: off/hollow icon
+        if (iconEl) iconEl.className = 'codicon codicon-layout-sidebar-right-off';
+        elements.toggleDetailsBtn.title = '显示详情面板';
+      } else {
+        // Panel visible: on/filled icon
+        if (iconEl) iconEl.className = 'codicon codicon-layout-sidebar-right';
+        elements.toggleDetailsBtn.title = '隐藏详情面板';
+      }
+    }
     if (state.rightPaneVisible !== 0) {
       window.dispatchEvent(new Event('detailsExpanded'));
     }
@@ -75,14 +79,20 @@ export function onRightPaneStateChange(callback: () => void) {
   stateChangeCallback = callback;
 }
 
+const numToStateMap: Record<number, string> = {
+  1: RightPaneState.OVERVIEW,
+  3: RightPaneState.HISTORY,
+  4: RightPaneState.FILE_BLAME_STATS,
+  5: RightPaneState.FILE_HISTORY,
+};
+
 export function setRightPaneStateByNumber(num: number) {
   if (num === 0) {
     setRightPaneVisible(0);
   } else {
     setRightPaneVisible(1);
-    if (num === 1) {
-      setRightPane(RightPaneState.OVERVIEW);
-    } else if (num === 2) {
+    if (num === 2) {
+      // Special case: num 2 can be COMMIT or AUTHOR depending on context
       if (state.selectedCommitHash) {
         setRightPane(RightPaneState.COMMIT);
       } else if (state.currentFocusedAuthor) {
@@ -90,12 +100,8 @@ export function setRightPaneStateByNumber(num: number) {
       } else {
         setRightPane(RightPaneState.OVERVIEW);
       }
-    } else if (num === 3) {
-      setRightPane(RightPaneState.HISTORY);
-    } else if (num === 4) {
-      setRightPane(RightPaneState.FILE_BLAME_STATS);
-    } else if (num === 5) {
-      setRightPane(RightPaneState.FILE_HISTORY);
+    } else {
+      setRightPane(numToStateMap[num] || RightPaneState.OVERVIEW);
     }
   }
   

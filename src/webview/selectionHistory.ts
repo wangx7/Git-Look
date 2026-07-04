@@ -1,11 +1,7 @@
-import { state } from './state';
-import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, escapeHtml, hexToRgba, getAvatarColor, getInitials, fmtNum } from './utils/format';
+import { escapeHtml } from './utils/format';
 import { RightPaneState } from './types';
-import { getFileIconInfo } from './utils/fileIcons';
-import { constants } from './constants';
-import { setRightPane, setRightPaneVisible, ensureDetailsExpanded } from './rightPane';
-import { requestStats, hideLoading, showLoading } from './dataLoader';
+import { setRightPane, ensureDetailsExpanded } from './rightPane';
+import { createHistoryCard } from './historyCard';
 
 let activeHistoryHash: any = null;
 const historyFileInfoEl = document.getElementById('history-file-info');
@@ -28,23 +24,7 @@ export function renderSelectionHistory(filePath, startLine, endLine, historyComm
     }
 
     historyCommits.forEach(c => {
-      const card = document.createElement('div');
-      card.className = 'history-card';
-      card.dataset.hash = c.hash;
-
-      const shortHash = c.hash.substring(0, 7);
-      const relTime = getRelativeTime(c.timestamp);
-
-      card.innerHTML = `
-          <div class="history-card-header">
-            <div class="history-card-header-left">
-              <span class="history-card-author"><i class="codicon codicon-person"></i> ${escapeHtml(c.author)}</span>
-              <span class="history-card-hash-badge">${shortHash}</span>
-            </div>
-            <span class="history-card-date">${relTime}</span>
-          </div>
-          <div class="history-card-msg">${escapeHtml(c.message)}</div>
-        `;
+      const card = createHistoryCard(c);
 
       card.addEventListener('click', () => {
         // Highlight active card

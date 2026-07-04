@@ -1,15 +1,23 @@
 import { state } from './state';
 import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, escapeHtml, hexToRgba, getAvatarColor, getInitials, fmtNum } from './utils/format';
-import { RightPaneState } from './types';
-import { getFileIconInfo } from './utils/fileIcons';
+import { colors } from './utils/format';
 import { constants } from './constants';
-import { setRightPane, setRightPaneVisible, ensureDetailsExpanded } from './rightPane';
-import { requestStats, hideLoading, showLoading } from './dataLoader';
 
 const rowHeight = constants.rowHeight;
 const laneWidth = constants.laneWidth;
 const paddingLeft = constants.paddingLeft;
+
+export function highlightLane(branchId: number) {
+  elements.graphSvg.classList.add('hover-active');
+  elements.graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
+  elements.graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
+}
+
+export function clearLaneHighlight() {
+  elements.graphSvg.classList.remove('hover-active');
+  elements.graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
+  elements.graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
+}
 
 export function drawSvg(startIndex: number, endIndex: number) {
   elements.graphSvg.innerHTML = '';
@@ -100,17 +108,8 @@ export function drawSvg(startIndex: number, endIndex: number) {
     path.setAttribute('stroke-width', strokeWidth.toString());
     path.setAttribute('fill', 'none');
 
-    path.addEventListener('mouseover', () => {
-      const branchId = line.colorIdx;
-      elements.graphSvg.classList.add('hover-active');
-      elements.graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
-      elements.graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
-    });
-    path.addEventListener('mouseout', () => {
-      elements.graphSvg.classList.remove('hover-active');
-      elements.graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
-      elements.graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
-    });
+    path.addEventListener('mouseover', () => highlightLane(line.colorIdx));
+    path.addEventListener('mouseout', clearLaneHighlight);
 
     elements.graphSvg.appendChild(path);
   });
@@ -150,16 +149,8 @@ export function drawSvg(startIndex: number, endIndex: number) {
       group.appendChild(outer);
       group.appendChild(inner);
 
-      group.addEventListener('mouseover', () => {
-        elements.graphSvg.classList.add('hover-active');
-        elements.graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
-        elements.graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
-      });
-      group.addEventListener('mouseout', () => {
-        elements.graphSvg.classList.remove('hover-active');
-        elements.graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
-        elements.graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
-      });
+      group.addEventListener('mouseover', () => highlightLane(branchId));
+      group.addEventListener('mouseout', clearLaneHighlight);
 
       elements.graphSvg.appendChild(group);
     } else {
@@ -172,16 +163,8 @@ export function drawSvg(startIndex: number, endIndex: number) {
       circle.setAttribute('stroke', 'var(--bg-color)');
       circle.setAttribute('stroke-width', '1.5');
 
-      circle.addEventListener('mouseover', () => {
-        elements.graphSvg.classList.add('hover-active');
-        elements.graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
-        elements.graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
-      });
-      circle.addEventListener('mouseout', () => {
-        elements.graphSvg.classList.remove('hover-active');
-        elements.graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
-        elements.graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
-      });
+      circle.addEventListener('mouseover', () => highlightLane(branchId));
+      circle.addEventListener('mouseout', clearLaneHighlight);
 
       elements.graphSvg.appendChild(circle);
     }

@@ -153,17 +153,21 @@ export function initMessageHandler() {
       case 'statsLoaded':
         state.currentStatsData = message.stats;
         renderStatsStrip(message.stats);
-        if (state.rightPaneState === RightPaneState.OVERVIEW || state.rightPaneState === RightPaneState.LOADING) {
-          if (window._pendingForceExpand || state.rightPaneVisible === 1) {
-            setRightPane(RightPaneState.OVERVIEW);
-          } else {
-            setRightPane(RightPaneState.OVERVIEW);
-            setRightPaneVisible(0);
-          }
+        if (window._pendingForceExpand) {
+          // 筛选/重新加载触发：无论当前右侧显示什么，统一切换到统计概览
+          setRightPane(RightPaneState.OVERVIEW);
           renderOverviewStats(message.stats);
           window._pendingForceExpand = false;
+        } else if (state.rightPaneState === RightPaneState.OVERVIEW || state.rightPaneState === RightPaneState.LOADING) {
+          // 非筛选触发的统计刷新（如后台刷新）：只在右侧可见时更新内容
+          if (state.rightPaneVisible === 1) {
+            setRightPane(RightPaneState.OVERVIEW);
+          } else {
+            state.rightPaneState = RightPaneState.OVERVIEW;
+          }
+          renderOverviewStats(message.stats);
         } else if (state.rightPaneState === RightPaneState.AUTHOR && state.currentFocusedAuthor) {
-          // Refresh author detail with new data
+          // 作者详情页：用新数据刷新
           const contrib = message.stats.contributors.find((c: any) => c.author === state.currentFocusedAuthor);
           if (contrib) { showAuthorDetail(contrib); }
         }

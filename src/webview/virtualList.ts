@@ -1,8 +1,9 @@
 import { state } from './state';
 import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, escapeHtml, hexToRgba } from './utils/format';
+import { colors, getRelativeTime, formatDate, formatCommitDate, escapeHtml, hexToRgba } from './utils/format';
 import { constants } from './constants';
-import { drawSvg, selectCircleInGraph } from './svgRenderer';
+import { drawSvg, selectCircleInGraph, highlightLane, clearLaneHighlight } from './svgRenderer';
+import { renderInlineBadges } from './badgeRenderer';
 
 const rowHeight = constants.rowHeight;
 
@@ -34,27 +35,24 @@ export function updateVirtualList() {
 export function renderVisibleRows(startIndex, endIndex) {
   const fragment = document.createDocumentFragment();
 
-  // Top Spacer
-  if (startIndex > 0) {
-    const topSpacer = document.createElement('tr');
-    topSpacer.className = 'virtual-spacer-top';
-    const spacerHeight = startIndex * rowHeight;
-    topSpacer.style.height = `${spacerHeight}px`;
+  function createSpacer(className: string, height: number): HTMLTableRowElement {
+    const spacer = document.createElement('tr');
+    spacer.className = className;
+    spacer.style.height = `${height}px`;
     const td1 = document.createElement('td');
     td1.className = 'graph-col';
-    td1.style.width = `${state.currentGraphWidth}px`;
-    td1.style.minWidth = `${state.currentGraphWidth}px`;
-    td1.style.height = `${spacerHeight}px`;
-    td1.style.padding = '0';
-    td1.style.border = 'none';
+    td1.style.cssText = `width:${state.currentGraphWidth}px;min-width:${state.currentGraphWidth}px;height:${height}px;padding:0;border:none;`;
     const td2 = document.createElement('td');
     td2.className = 'content-col';
-    td2.style.height = `${spacerHeight}px`;
-    td2.style.padding = '0';
-    td2.style.border = 'none';
-    topSpacer.appendChild(td1);
-    topSpacer.appendChild(td2);
-    fragment.appendChild(topSpacer);
+    td2.style.cssText = `height:${height}px;padding:0;border:none;`;
+    spacer.appendChild(td1);
+    spacer.appendChild(td2);
+    return spacer;
+  }
+
+  // Top Spacer
+  if (startIndex > 0) {
+    fragment.appendChild(createSpacer('virtual-spacer-top', startIndex * rowHeight));
   }
 
   const rowMaxLanes = window.rowMaxLanes || [];
@@ -80,63 +78,12 @@ export function renderVisibleRows(startIndex, endIndex) {
 
     const relTime = getRelativeTime(c.timestamp);
     const absTime = formatDate(c.timestamp);
+    const commitDate = formatCommitDate(c.timestamp);
 
-    // Branch decorations HTML
-    let decsHtml = '';
-    if (c.decorations && c.decorations.length > 0) {
-      const makeBadge = (dec, overrideLabel) => {
-        let badgeClass = 'badge-branch';
-        let iconHtml = '<i class="codicon codicon-git-branch"></i>';
-        let badgeColor = state.branchColorMap.get(dec) || colors[0];
-        let isHead = false;
-        const isRemote = state.remoteBranches.includes(dec) || dec.startsWith('origin/');
-        let displayDec = overrideLabel || dec;
-
-        if (dec.startsWith('tag: ')) {
-          badgeClass = 'badge-tag';
-          iconHtml = '<i class="codicon codicon-tag"></i>';
-          displayDec = overrideLabel || dec.substring(5);
-          badgeColor = '#f59e0b';
-        } else if (isRemote) {
-          badgeClass = 'badge-remote-branch';
-          iconHtml = '<i class="codicon codicon-cloud"></i>';
-        } else if (dec === 'HEAD') {
-          badgeClass = 'badge-head';
-          iconHtml = '<i class="codicon codicon-circle-filled"></i>';
-          isHead = true;
-        }
-
-        const style = isHead
-          ? `background-color: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.22);`
-          : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor}; border-color: ${hexToRgba(badgeColor, 0.35)};`;
-
-        return `<span class="ref-badge ${badgeClass}" style="${style}">${iconHtml}${escapeHtml(displayDec)}</span>`;
-      };
-
-      if (c.decorations[0] === 'HEAD') {
-        const nextLocal = c.decorations.slice(1).find(d =>
-          !d.startsWith('origin/') && !d.startsWith('tag: ') && !state.remoteBranches.includes(d)
-        );
-        const headLabel = nextLocal ? `HEAD → ${nextLocal}` : 'HEAD';
-        decsHtml += makeBadge('HEAD', headLabel);
-
-        const remaining = c.decorations.slice(1).filter(d => d !== nextLocal);
-        if (remaining.length === 1) {
-          decsHtml += makeBadge(remaining[0], '');
-        } else if (remaining.length > 1) {
-          const remainingNames = remaining.join(', ');
-          decsHtml += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="${escapeHtml(remainingNames)}">+${remaining.length}</span>`;
-        }
-      } else {
-        decsHtml += makeBadge(c.decorations[0], '');
-        if (c.decorations.length > 1) {
-          const remainingNames = c.decorations.slice(1).join(', ');
-          decsHtml += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="${escapeHtml(remainingNames)}">+${c.decorations.length - 1}</span>`;
-        }
-      }
-    }
+    const decsHtml = renderInlineBadges(c);
 
     const inlineAuthorHtml = `<span class="commit-author-inline" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</span>`;
+    const inlineDateHtml = `<span class="commit-date-inline" title="${absTime}">${commitDate}</span>`;
     const currentMaxLanes = rowMaxLanes[r] !== undefined ? rowMaxLanes[r] : 0;
 
     tr.innerHTML = `
@@ -146,6 +93,7 @@ export function renderVisibleRows(startIndex, endIndex) {
             <div class="commit-main">
               <span class="commit-message" title="${escapeHtml(c.message)}">${escapeHtml(c.message)}</span>
               ${inlineAuthorHtml}
+              ${inlineDateHtml}
               ${decsHtml}
             </div>
           </div>
@@ -155,10 +103,7 @@ export function renderVisibleRows(startIndex, endIndex) {
     tr.addEventListener('mouseenter', () => {
       const node = state.cachedCommitNodes[c.hash];
       if (node) {
-        const branchId = node.colorIdx;
-        elements.graphSvg.classList.add('hover-active');
-        elements.graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
-        elements.graphSvg.querySelectorAll(`.lane-node-${branchId}`).forEach(n => n.classList.add('hovered-lane-node'));
+        highlightLane(node.colorIdx);
       }
       const el = elements.graphSvg.querySelector(`.node-${c.hash}`);
       if (el) {
@@ -170,10 +115,7 @@ export function renderVisibleRows(startIndex, endIndex) {
     });
 
     tr.addEventListener('mouseleave', () => {
-      elements.graphSvg.classList.remove('hover-active');
-      elements.graphSvg.querySelectorAll('.hovered-lane-path').forEach(p => p.classList.remove('hovered-lane-path'));
-      elements.graphSvg.querySelectorAll('.hovered-lane-node').forEach(n => n.classList.remove('hovered-lane-node'));
-
+      clearLaneHighlight();
       const el = elements.graphSvg.querySelector(`.node-${c.hash}`);
       if (el) {
         el.classList.remove('hovered');
@@ -188,25 +130,7 @@ export function renderVisibleRows(startIndex, endIndex) {
 
   // Bottom Spacer
   if (endIndex < state.commits.length - 1) {
-    const bottomSpacer = document.createElement('tr');
-    bottomSpacer.className = 'virtual-spacer-bottom';
-    const spacerHeight = (state.commits.length - 1 - endIndex) * rowHeight;
-    bottomSpacer.style.height = `${spacerHeight}px`;
-    const td1 = document.createElement('td');
-    td1.className = 'graph-col';
-    td1.style.width = `${state.currentGraphWidth}px`;
-    td1.style.minWidth = `${state.currentGraphWidth}px`;
-    td1.style.height = `${spacerHeight}px`;
-    td1.style.padding = '0';
-    td1.style.border = 'none';
-    const td2 = document.createElement('td');
-    td2.className = 'content-col';
-    td2.style.height = `${spacerHeight}px`;
-    td2.style.padding = '0';
-    td2.style.border = 'none';
-    bottomSpacer.appendChild(td1);
-    bottomSpacer.appendChild(td2);
-    fragment.appendChild(bottomSpacer);
+    fragment.appendChild(createSpacer('virtual-spacer-bottom', (state.commits.length - 1 - endIndex) * rowHeight));
   }
 
   // Bottom "loaded all" footer

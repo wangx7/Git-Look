@@ -1,15 +1,18 @@
-import { state } from './state';
 import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, escapeHtml, hexToRgba, getAvatarColor, getInitials, fmtNum } from './utils/format';
-import { RightPaneState } from './types';
-import { getFileIconInfo } from './utils/fileIcons';
-import { constants } from './constants';
-import { setRightPane, setRightPaneVisible, ensureDetailsExpanded } from './rightPane';
-import { requestStats, hideLoading, showLoading } from './dataLoader';
+import { escapeHtml, getAvatarColor, getInitials, fmtNum } from './utils/format';
+import { setRightPane } from './rightPane';
 
 import { showAuthorDetail } from './authorDetail';
 import { reloadData } from './dataLoader';
 import { adjustSelectWidth } from './filters';
+
+function formatRangeLabel(since: string, until: string): string {
+  if (!since && !until) return '';
+  if (since === until || !until) {
+    return since || '';
+  }
+  return `${since} → ${until}`;
+}
 
 export function renderStatsStrip(stats) {
   if (!elements.statsStrip) return;
@@ -18,13 +21,13 @@ export function renderStatsStrip(stats) {
   if (elements.stripAdd) elements.stripAdd.textContent = '+' + fmtNum(stats.totalAdditions);
   if (elements.stripDel) elements.stripDel.textContent = '-' + fmtNum(stats.totalDeletions);
   if (elements.stripContributorsVal) elements.stripContributorsVal.textContent = stats.contributors.length;
-  const range = `${stats.sinceDate} ~ ${stats.untilDate}`;
+  const range = formatRangeLabel(stats.sinceDate, stats.untilDate);
   if (elements.stripRange) elements.stripRange.textContent = range;
 }
 
 export function renderOverviewStats(stats) {
   // Range label
-  const rangeLabel = `${stats.sinceDate} → ${stats.untilDate}`;
+  const rangeLabel = formatRangeLabel(stats.sinceDate, stats.untilDate);
   elements.overviewRange.textContent = rangeLabel;
 
   // Summary cards
@@ -32,8 +35,12 @@ export function renderOverviewStats(stats) {
   elements.ovAdd.textContent = '+' + fmtNum(stats.totalAdditions);
   elements.ovDel.textContent = '-' + fmtNum(stats.totalDeletions);
 
-  // Activity SVG chart
-  renderActivityChart(stats.dailyActivity);
+  // Activity SVG chart: use hourly when range is a single day
+  if (stats.hourlyActivity) {
+    renderActivityChart(stats.hourlyActivity, 'hourly');
+  } else {
+    renderActivityChart(stats.dailyActivity, 'daily');
+  }
 
   // Contributors leaderboard
   elements.contributorsList.innerHTML = '';
@@ -49,7 +56,7 @@ export function renderOverviewStats(stats) {
           <span class="contributor-rank">${i + 1}</span>
           <span class="avatar-circle" style="background-color:${color};width:18px;height:18px;font-size:8px;margin-right:0;flex-shrink:0;border:none;box-shadow:none;">${escapeHtml(initials)}</span>
           <span class="contributor-name">${escapeHtml(c.author)}</span>
-          <span class="contributor-state.commits">${c.commits} state.commits</span>
+          <span class="contributor-commits">${c.commits} 次提交</span>
         </div>
         <div class="contributor-bar-row">
           <div class="contributor-bar-track">
@@ -70,9 +77,9 @@ export function renderOverviewStats(stats) {
   renderTopFiles(elements.topFilesList, stats.topFiles);
 }
 
-export function renderActivityChart(dailyActivity) {
+export function renderActivityChart(activity: any[], mode: 'daily' | 'hourly' = 'daily') {
   elements.activitySvg.innerHTML = '';
-  if (!dailyActivity || dailyActivity.length === 0) return;
+  if (!activity || activity.length === 0) return;
 
   const svgW = elements.activitySvg.clientWidth || 300;
   const svgH = 80;
@@ -86,14 +93,14 @@ export function renderActivityChart(dailyActivity) {
   const chartW = svgW - padLeft - padRight;
   const chartH = svgH - padTop - padBot;
 
-  const maxCount = Math.max(...dailyActivity.map(d => d.count), 1);
-  const n = dailyActivity.length;
+  const maxCount = Math.max(...activity.map(d => d.count), 1);
+  const n = activity.length;
 
   // Compute point coordinates
-  const pts = dailyActivity.map((d, i) => ({
+  const pts = activity.map((d, i) => ({
     x: padLeft + (i / Math.max(n - 1, 1)) * chartW,
     y: padTop + chartH - (d.count / maxCount) * chartH,
-    date: d.date,
+    label: mode === 'hourly' ? (d as any).label : (d as any).date,
     count: d.count
   }));
 
@@ -144,56 +151,92 @@ export function renderActivityChart(dailyActivity) {
   area.setAttribute('stroke', 'none');
   elements.activitySvg.appendChild(area);
 
-  // Line
+  // Outline layer: dark halo for contrast on ANY background (dark/light/blue/red themes)
+  // Fixes Trae blue theme: blue line on blue background = invisible
+  const lineOutline = document.createElementNS(ns, 'path');
+  lineOutline.setAttribute('d', linePath);
+  lineOutline.setAttribute('fill', 'none');
+  lineOutline.setAttribute('stroke', 'rgba(0,0,0,0.45)');
+  lineOutline.setAttribute('stroke-width', '4.2');
+  lineOutline.setAttribute('stroke-linecap', 'round');
+  lineOutline.setAttribute('stroke-linejoin', 'round');
+  elements.activitySvg.appendChild(lineOutline);
+
+  // Main accent line — visible on any bg thanks to halos above
   const line = document.createElementNS(ns, 'path');
   line.setAttribute('d', linePath);
   line.setAttribute('fill', 'none');
   line.setAttribute('stroke', 'var(--accent)');
-  line.setAttribute('stroke-width', '1.8');
+  line.setAttribute('stroke-width', '2');
   line.setAttribute('stroke-linecap', 'round');
   line.setAttribute('stroke-linejoin', 'round');
   elements.activitySvg.appendChild(line);
 
-  // Month tick labels
-  let lastMonth = '';
-  pts.forEach((p, i) => {
-    const month = dailyActivity[i].date.substring(0, 7); // YYYY-MM
-    if (month !== lastMonth) {
-      lastMonth = month;
-      const label = document.createElementNS(ns, 'text');
-      label.setAttribute('x', p.x.toFixed(1));
-      label.setAttribute('y', (svgH - 4).toFixed(1));
-      label.setAttribute('font-size', '8');
-      label.setAttribute('fill', 'var(--fg-faint, rgba(128,128,128,0.5))');
-      label.setAttribute('text-anchor', 'middle');
-      label.setAttribute('font-family', 'var(--font-family, sans-serif)');
-      label.textContent = month.substring(5); // MM only
-      elements.activitySvg.appendChild(label);
-    }
-  });
+
+  // X-axis tick labels
+  if (mode === 'hourly') {
+    // Show every 3 hours: 00, 03, 06 ... 21
+    pts.forEach((p, i) => {
+      if (i % 3 === 0) {
+        const label = document.createElementNS(ns, 'text');
+        label.setAttribute('x', p.x.toFixed(1));
+        label.setAttribute('y', (svgH - 4).toFixed(1));
+        label.setAttribute('font-size', '8');
+        label.setAttribute('fill', 'var(--fg-faint, rgba(128,128,128,0.5))');
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-family', 'var(--font-family, sans-serif)');
+        label.textContent = p.label;
+        elements.activitySvg.appendChild(label);
+      }
+    });
+  } else {
+    // Month tick labels (daily mode)
+    let lastMonth = '';
+    pts.forEach((p, i) => {
+      const month = activity[i].date.substring(0, 7); // YYYY-MM
+      if (month !== lastMonth) {
+        lastMonth = month;
+        const label = document.createElementNS(ns, 'text');
+        label.setAttribute('x', p.x.toFixed(1));
+        label.setAttribute('y', (svgH - 4).toFixed(1));
+        label.setAttribute('font-size', '8');
+        label.setAttribute('fill', 'var(--fg-faint, rgba(128,128,128,0.5))');
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-family', 'var(--font-family, sans-serif)');
+        label.textContent = month.substring(5); // MM only
+        elements.activitySvg.appendChild(label);
+      }
+    });
+  }
 
   // Interactive hover overlay
   const hoverGroup = document.createElementNS(ns, 'g');
   hoverGroup.setAttribute('style', 'pointer-events: none; opacity: 0;');
   hoverGroup.setAttribute('class', 'activity-hover-group');
 
-  // Vertical crosshair
+  // Vertical crosshair (subtle neutral gray, visible on any background)
   const vLine = document.createElementNS(ns, 'line');
   vLine.setAttribute('class', 'activity-crosshair');
   vLine.setAttribute('y1', padTop.toString());
   vLine.setAttribute('y2', (padTop + chartH).toString());
-  vLine.setAttribute('stroke', 'var(--accent)');
+  vLine.setAttribute('stroke', 'var(--fg-faint)');
   vLine.setAttribute('stroke-width', '1');
   vLine.setAttribute('stroke-dasharray', '3,3');
-  vLine.setAttribute('opacity', '0.5');
+  vLine.setAttribute('opacity', '0.6');
   hoverGroup.appendChild(vLine);
 
-  // Hover dot
+  // Hover dot dark outline for contrast (blue theme safe)
+  const dotOutline = document.createElementNS(ns, 'circle');
+  dotOutline.setAttribute('r', '6');
+  dotOutline.setAttribute('fill', 'rgba(0,0,0,0.55)');
+  hoverGroup.appendChild(dotOutline);
+
+  // Hover dot main accent color
   const dot = document.createElementNS(ns, 'circle');
   dot.setAttribute('r', '4');
   dot.setAttribute('fill', 'var(--accent)');
-  dot.setAttribute('stroke', 'var(--bg-color, #1e1e1e)');
-  dot.setAttribute('stroke-width', '2');
+  dot.setAttribute('stroke', 'var(--fg-color)');
+  dot.setAttribute('stroke-width', '1.5');
   hoverGroup.appendChild(dot);
   elements.activitySvg.appendChild(hoverGroup);
 
@@ -234,7 +277,7 @@ export function renderActivityChart(dailyActivity) {
     const mouseX = e.clientX - rect.left - padLeft;
     const idx = Math.max(0, Math.min(n - 1, Math.round((mouseX / chartW) * (n - 1))));
     const p = pts[idx];
-    const d = dailyActivity[idx];
+    const d = activity[idx];
 
     hoverGroup.style.opacity = '1';
     vLine.setAttribute('x1', p.x.toFixed(1));
@@ -243,7 +286,12 @@ export function renderActivityChart(dailyActivity) {
     dot.setAttribute('cy', p.y.toFixed(1));
 
     tooltip.style.display = 'block';
-    tooltip.innerHTML = `<span style="opacity:0.7;font-size:12px;">${d.date}</span><br><strong style="color:var(--accent);font-size:13px;">${d.count}</strong> <span style="font-size:12px">次提交</span><br><span style="opacity:0.6;font-size:11px;">点击筛选此日</span>`;
+    if (mode === 'hourly') {
+      const endHour = String(d.hour + 1).padStart(2, '0');
+      tooltip.innerHTML = `<span style="opacity:0.7;font-size:12px;">${d.label} - ${endHour}:00</span><br><strong style="color:var(--vscode-editorHoverWidget-foreground);font-size:13px;font-weight:700;">${d.count}</strong> <span style="font-size:12px">次提交</span>`;
+    } else {
+      tooltip.innerHTML = `<span style="opacity:0.7;font-size:12px;">${p.label}</span><br><strong style="color:var(--vscode-editorHoverWidget-foreground);font-size:13px;font-weight:700;">${d.count}</strong> <span style="font-size:12px">次提交</span><br><span style="opacity:0.6;font-size:11px;">点击筛选此日</span>`;
+    }
     // Position tooltip with boundary checks
     const tw = tooltip.offsetWidth;
     const th = tooltip.offsetHeight;
@@ -268,15 +316,16 @@ export function renderActivityChart(dailyActivity) {
     tooltip.style.display = 'none';
   });
 
-  // Click a day → set date filter to that single day
+  // Click a day/hour → only filter for daily mode
   overlay.addEventListener('click', (e) => {
+    if (mode === 'hourly') return; // 小时粒度无法再往下筛选
     const rect = elements.activitySvg.getBoundingClientRect();
     const mouseX = e.clientX - rect.left - padLeft;
     const idx = Math.max(0, Math.min(n - 1, Math.round((mouseX / chartW) * (n - 1))));
-    const d = dailyActivity[idx];
+    const d = activity[idx];
     if (!d || !d.date) return;
 
-    // Set date preset to custom and fill since/until with the clicked day
+    // UI shows single selected day; getFilters() will automatically extend until by 1 day for git
     elements.datePresetSelect.value = 'custom';
     elements.dateRangeGroup.classList.remove('hidden');
     elements.sinceDate.value = d.date;

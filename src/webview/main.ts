@@ -49,7 +49,14 @@ function init() {
   window.addEventListener('detailsExpanded', () => {
     import('./svgRenderer').then(({ drawSvg }) => drawSvg(state.lastStartIndex || 0, state.lastEndIndex || state.commits.length - 1));
     if (state.currentStatsData && state.currentStatsData.dailyActivity) {
-      import('./statsCharts').then(({ renderActivityChart }) => renderActivityChart(state.currentStatsData.dailyActivity));
+      import('./statsCharts').then(({ renderActivityChart }) => {
+        const s = state.currentStatsData;
+        if (s.hourlyActivity) {
+          renderActivityChart(s.hourlyActivity, 'hourly');
+        } else {
+          renderActivityChart(s.dailyActivity, 'daily');
+        }
+      });
     }
   });
 
@@ -71,6 +78,18 @@ function init() {
         import('./statsCharts').then(({ renderOverviewStats }) => {
             renderOverviewStats(state.currentStatsData);
             setRightPane(RightPaneState.OVERVIEW);
+        });
+      }
+    });
+  }
+
+  if (elements.authorBackBtn) {
+    elements.authorBackBtn.addEventListener('click', () => {
+      state.currentFocusedAuthor = null;
+      if (state.currentStatsData) {
+        import('./statsCharts').then(({ renderOverviewStats }) => {
+          renderOverviewStats(state.currentStatsData);
+          setRightPane(RightPaneState.OVERVIEW);
         });
       }
     });

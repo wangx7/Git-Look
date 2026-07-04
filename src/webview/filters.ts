@@ -1,5 +1,6 @@
 import { state } from './state';
 import { elements } from './dom';
+import { toLocalDateString } from './utils/format';
 
 
 export function getFilters() {
@@ -7,21 +8,16 @@ export function getFilters() {
   let untilVal = undefined;
 
   const preset = elements.datePresetSelect.value;
-  if (preset === '24h') {
+  const presetDays: Record<string, number> = { '24h': 1, '7d': 7, '30d': 30 };
+  if (preset in presetDays) {
     const d = new Date();
-    d.setDate(d.getDate() - 1);
-    sinceVal = d.toISOString().split('T')[0];
-  } else if (preset === '7d') {
-    const d = new Date();
-    d.setDate(d.getDate() - 7);
-    sinceVal = d.toISOString().split('T')[0];
-  } else if (preset === '30d') {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    sinceVal = d.toISOString().split('T')[0];
+    d.setDate(d.getDate() - presetDays[preset]);
+    sinceVal = toLocalDateString(d);
   } else if (preset === 'custom') {
     sinceVal = elements.sinceDate.value || undefined;
     untilVal = elements.untilDate.value || undefined;
+    // Note: gitHelper.ts automatically appends ' 23:59:59' to YYYY-MM-DD until dates
+    // No need to adjust dates client-side — backend already handles end-of-day correctly
   }
 
   return {
@@ -34,34 +30,48 @@ export function getFilters() {
 }
 
 export function adjustSelectWidth(select: HTMLSelectElement) {
+  const filterGroup = select.parentElement;
   if (select.value === "") {
     select.classList.add('placeholder-selected');
+    filterGroup?.classList.add('is-empty');
+    select.style.width = '';
   } else {
     select.classList.remove('placeholder-selected');
-  }
+    filterGroup?.classList.remove('is-empty');
 
-  let measurer = document.getElementById('select-width-measurer');
-  if (!measurer) {
-    measurer = document.createElement('span');
-    measurer.id = 'select-width-measurer';
-    measurer.style.position = 'absolute';
-    measurer.style.visibility = 'hidden';
-    measurer.style.whiteSpace = 'pre';
-    measurer.style.fontFamily = select.style.fontFamily || 'var(--font-family)';
-    measurer.style.fontSize = '11px';
-    measurer.style.fontWeight = 'normal';
-    document.body.appendChild(measurer);
+    let measurer = document.getElementById('select-width-measurer');
+    if (!measurer) {
+      measurer = document.createElement('span');
+      measurer.id = 'select-width-measurer';
+      measurer.style.position = 'absolute';
+      measurer.style.visibility = 'hidden';
+      measurer.style.whiteSpace = 'pre';
+      measurer.style.fontFamily = select.style.fontFamily || 'var(--font-family)';
+      measurer.style.fontSize = '11px';
+      measurer.style.fontWeight = 'normal';
+      document.body.appendChild(measurer);
+    }
+    const selectedOption = select.options ? select.options[select.selectedIndex] : undefined;
+    measurer.textContent = selectedOption ? selectedOption.text : '';
+    const width = measurer.offsetWidth + 28;
+    select.style.width = `${width}px`;
   }
-  const selectedOption = select.options ? select.options[select.selectedIndex] : undefined;
-  measurer.textContent = selectedOption ? selectedOption.text : '';
-  const width = measurer.offsetWidth + 28;
-  select.style.width = `${width}px`;
 }
 
 export function updateSelectWidths() {
   adjustSelectWidth(elements.branchSelect);
   adjustSelectWidth(elements.authorSelect);
   adjustSelectWidth(elements.datePresetSelect);
+  if (elements.repoSelect) {
+    adjustSelectWidth(elements.repoSelect);
+  }
+  
+  // Update search group value state
+  if (elements.searchInput.value.trim()) {
+    elements.searchInput.parentElement?.classList.add('has-value');
+  } else {
+    elements.searchInput.parentElement?.classList.remove('has-value');
+  }
 }
 
 export function updateFilterControls() {
@@ -121,6 +131,11 @@ export function initFilters(onFilterChange: () => void) {
 
   let searchTimeout: any;
   elements.searchInput.addEventListener('input', () => {
+    if (elements.searchInput.value.trim()) {
+      elements.searchInput.parentElement?.classList.add('has-value');
+    } else {
+      elements.searchInput.parentElement?.classList.remove('has-value');
+    }
     clearTimeout(searchTimeout);
     elements.searchInput.style.opacity = '0.55'; // 防抖等待期间给出视觉反馈
     searchTimeout = setTimeout(() => {
@@ -137,6 +152,7 @@ export function initFilters(onFilterChange: () => void) {
     elements.untilDate.value = '';
     elements.dateRangeGroup.classList.add('hidden');
     elements.searchInput.value = '';
+    elements.searchInput.parentElement?.classList.remove('has-value');
     updateSelectWidths();
     onFilterChange();
   });

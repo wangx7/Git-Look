@@ -9,7 +9,7 @@
     />
     <link rel="stylesheet" href="${codiconUri}" />
     <link rel="stylesheet" href="${styleUri}" />
-    <title>Git Graph</title>
+    <title>Git 潮汐树</title>
   </head>
   <body>
     <div class="container">
@@ -70,7 +70,12 @@
 
             <button id="reset-btn" title="重置所有过滤条件">
               <i class="codicon codicon-clear-all"></i>
-              <span>重置</span>
+            </button>
+
+            <div style="flex: 1"></div>
+
+            <button id="toggle-details-btn" title="隐藏详情面板">
+              <i class="codicon codicon-layout-sidebar-right"></i>
             </button>
           </div>
 
@@ -81,7 +86,23 @@
           <div class="list-pane">
             <!-- 空状态：无 Git 仓库 -->
             <div id="empty-state" class="empty-state hidden">
-              <i class="codicon codicon-repo"></i>
+              <svg
+                class="empty-state-svg"
+                width="64"
+                height="64"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="6" cy="6" r="3" />
+                <circle cx="18" cy="18" r="3" />
+                <path d="M6 9v6" />
+                <path d="M18 15v-2a3 3 0 0 0-3-3h-4" />
+              </svg>
               <span>未找到 Git 仓库</span>
               <span class="empty-state-hint">请打开一个包含 Git 仓库的文件夹</span>
             </div>
@@ -104,16 +125,10 @@
 
         <!-- Right Pane: Three States -->
         <div class="details-pane" id="details-pane">
-          <!-- Close button -->
-          <button class="details-close-btn" id="details-close-btn" title="折叠详情面板">
-            <i class="codicon codicon-close"></i>
-          </button>
-
           <!-- ── State 0: Overview Stats (default when nothing selected) ── -->
           <div id="overview-stats" class="overview-stats hidden">
             <div class="overview-header">
               <span class="overview-title"><i class="codicon codicon-graph"></i> 代码统计</span>
-              <span class="overview-range" id="overview-range">近100天</span>
             </div>
 
             <!-- Summary Cards -->
@@ -134,7 +149,10 @@
 
             <!-- Activity Chart -->
             <div class="stats-section">
-              <div class="stats-section-title">提交活跃度</div>
+              <div class="stats-section-title" style="display: flex; justify-content: space-between; align-items: center">
+                <span>提交活跃度</span>
+                <span class="overview-range" id="overview-range" style="font-weight: normal; font-size: 11px; color: var(--fg-muted)">近100天</span>
+              </div>
               <div class="activity-chart-wrap">
                 <svg id="activity-svg" class="activity-svg"></svg>
               </div>
@@ -142,7 +160,7 @@
 
             <!-- Contributors Leaderboard -->
             <div class="stats-section">
-              <div class="stats-section-title">贡献者排行 <span class="stats-section-hint">点击查看详情</span></div>
+              <div class="stats-section-title">贡献者</div>
               <div id="contributors-list" class="contributors-list"></div>
             </div>
 
@@ -195,6 +213,9 @@
           <!-- ── State 2: Author Detail ── -->
           <div id="author-stats" class="author-stats hidden">
             <div class="author-stats-header">
+              <button class="author-back-btn" id="author-back-btn" title="返回统计概览">
+                <i class="codicon codicon-arrow-left"></i>
+              </button>
               <span class="selection-history-title"><i class="codicon codicon-person"></i> 作者详情</span>
             </div>
             <div class="author-profile">
@@ -235,7 +256,7 @@
 
             <!-- Highlight in graph -->
             <div class="author-actions">
-              <button class="author-highlight-btn" id="author-highlight-btn"><i class="codicon codicon-eye"></i> 在图谱中高亮此作者</button>
+              <button class="author-highlight-btn" id="author-highlight-btn"><i class="codicon codicon-eye"></i> 在潮汐树中高亮此作者</button>
             </div>
           </div>
 

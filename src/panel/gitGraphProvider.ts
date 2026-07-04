@@ -17,6 +17,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _fileHistoryAutoTimer?: NodeJS.Timeout;
   private _fileHistoryActive = false;
   private _fileHistoryGeneration = 0;
+  private _lastFileHistoryPath?: string;
   private _repoDisposables: vscode.Disposable[] = [];
 
   public showFileBlameStats(fileName: string, stats: { author: string; lines: number }[]) {
@@ -624,6 +625,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
   public showFileHistory(data: { filePath: string, commits: any[] }) {
     if (this._view) {
+      this._fileHistoryActive = true;
+      this._lastFileHistoryPath = data.filePath;
       this._view.show(true); // Bring panel view to focus
       this._view.webview.postMessage({
         type: 'showFileHistory',
@@ -685,6 +688,12 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     if (!cwd || cwd !== gitRoot) {
       return;
     }
+
+    if (this._lastFileHistoryPath === filePath) {
+      // Prevent redundant reload when simply switching tabs of the same file (e.g. opening a diff)
+      return;
+    }
+    this._lastFileHistoryPath = filePath;
 
     const generation = ++this._fileHistoryGeneration;
 

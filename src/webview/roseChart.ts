@@ -1,11 +1,7 @@
 import { state } from './state';
-import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, escapeHtml, hexToRgba, getAvatarColor, getInitials, fmtNum } from './utils/format';
+import { colors, escapeHtml, hexToRgba, getAvatarColor } from './utils/format';
 import { RightPaneState } from './types';
-import { getFileIconInfo } from './utils/fileIcons';
-import { constants } from './constants';
-import { setRightPane, setRightPaneVisible, ensureDetailsExpanded } from './rightPane';
-import { requestStats, hideLoading, showLoading } from './dataLoader';
+import { setRightPane, ensureDetailsExpanded } from './rightPane';
 
 let lockedSliceHash: any = null;
 let lockedSliceColor: any = null;

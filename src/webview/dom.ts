@@ -10,6 +10,7 @@ export const elements = {
   untilDate: document.getElementById('until-date') as HTMLInputElement,
   searchInput: document.getElementById('search-input') as HTMLInputElement,
   resetBtn: document.getElementById('reset-btn') as HTMLButtonElement,
+  toggleDetailsBtn: document.getElementById('toggle-details-btn') as HTMLButtonElement,
   loadingOverlay: document.getElementById('loading') as HTMLElement,
   errorBanner: document.getElementById('error-message') as HTMLElement,
   commitsTbody: document.getElementById('commits-tbody') as HTMLElement,
@@ -18,7 +19,6 @@ export const elements = {
   
   detailsPane: document.getElementById('details-pane') as HTMLElement,
   resizerBar: document.getElementById('resizer-bar') as HTMLElement,
-  detailsCloseBtn: document.getElementById('details-close-btn') as HTMLButtonElement,
   detailsPlaceholder: document.getElementById('details-placeholder') as HTMLElement,
   detailsContent: document.getElementById('details-content') as HTMLElement,
   detailHashBadge: document.getElementById('detail-hash-badge') as HTMLElement,
@@ -51,6 +51,7 @@ export const elements = {
   contributorsList: document.getElementById('contributors-list') as HTMLElement,
   topFilesList: document.getElementById('top-files-list') as HTMLElement,
   authorStatsPane: document.getElementById('author-stats') as HTMLElement,
+  authorBackBtn: document.getElementById('author-back-btn') as HTMLButtonElement,
   authorStatsAvatar: document.getElementById('author-stats-avatar') as HTMLElement,
   authorStatsName: document.getElementById('author-stats-name') as HTMLElement,
   authorStatsEmail: document.getElementById('author-stats-email') as HTMLElement,

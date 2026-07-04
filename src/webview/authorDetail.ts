@@ -1,11 +1,8 @@
 import { state } from './state';
 import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, escapeHtml, hexToRgba, getAvatarColor, getInitials, fmtNum } from './utils/format';
+import { escapeHtml, getAvatarColor, getAvatarGradient, getInitials, fmtNum } from './utils/format';
 import { RightPaneState } from './types';
-import { getFileIconInfo } from './utils/fileIcons';
-import { constants } from './constants';
-import { setRightPane, setRightPaneVisible, ensureDetailsExpanded } from './rightPane';
-import { requestStats, hideLoading, showLoading } from './dataLoader';
+import { setRightPane, ensureDetailsExpanded } from './rightPane';
 
 import { renderTopFiles } from './statsCharts';
 
@@ -15,9 +12,10 @@ export function showAuthorDetail(contributor) {
   setRightPane(RightPaneState.AUTHOR);
 
   const color = getAvatarColor(contributor.author);
+  const gradient = getAvatarGradient(contributor.author);
   const initials = getInitials(contributor.author);
   elements.authorStatsAvatar.textContent = initials;
-  elements.authorStatsAvatar.style.backgroundColor = color;
+  elements.authorStatsAvatar.style.background = gradient;
   elements.authorStatsName.textContent = contributor.author;
   elements.authorStatsEmail.textContent = contributor.email || '';
 

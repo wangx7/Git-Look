@@ -9,7 +9,7 @@ import { requestStats, hideLoading, showLoading } from './dataLoader';
 
 import { updateVirtualList } from './virtualList';
 import { selectCircleInGraph } from './svgRenderer';
-import { collapseDetail } from './commitDetail';
+
 
 const rowHeight = constants.rowHeight;
 const laneWidth = constants.laneWidth;
@@ -359,7 +359,13 @@ export function renderTableAndGraph() {
   if (oldSelectedHash) {
     selectCircleInGraph(oldSelectedHash);
   } else {
-    collapseDetail();
+    // 筛选/刷新时没有选中的提交：只清除行高亮和SVG选中状态，
+    // 不收起右侧面板（面板可见性由 statsLoaded 消息统一管理）
+    const previouslySelected = elements.commitsTbody.querySelector('tr.commit-row.selected');
+    if (previouslySelected) {
+      previouslySelected.classList.remove('selected');
+    }
+    selectCircleInGraph(null);
   }
 }
 

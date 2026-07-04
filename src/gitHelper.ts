@@ -3,6 +3,17 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 
+/**
+ * Format Date to YYYY-MM-DD in LOCAL timezone (matches Git's date interpretation)
+ * Avoids off-by-one day errors from toISOString() which uses UTC
+ */
+function toLocalDateString(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export interface CommitInfo {
   hash: string;
   parents: string[];
@@ -61,6 +72,12 @@ export interface DailyActivity {
   count: number;
 }
 
+export interface HourlyActivity {
+  hour: number; // 0-23
+  label: string; // e.g. "00:00", "06:00"
+  count: number;
+}
+
 export interface FileStat {
   path: string;
   changes: number; // number of commits touching this file
@@ -73,6 +90,7 @@ export interface CodeStats {
   totalChanged: number;
   contributors: ContributorStat[];
   dailyActivity: DailyActivity[];
+  hourlyActivity: HourlyActivity[] | null; // non-null only when range ≤1 day
   topFiles: FileStat[];
   sinceDate: string;
   untilDate: string;
@@ -371,8 +389,14 @@ function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string
   }
 
   // Date filters
+  // Important: Git parses bare YYYY-MM-DD dates incorrectly in some versions/timezones,
+  // always explicitly append time (00:00:00 for since, 23:59:59 for until) to get the full day.
   if (filters.since) {
-    args.push(`--since=${filters.since}`);
+    let sinceVal = filters.since;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(sinceVal)) {
+      sinceVal += ' 00:00:00';
+    }
+    args.push(`--since=${sinceVal}`);
   }
   if (filters.until) {
     let untilVal = filters.until;
@@ -789,9 +813,15 @@ export async function getCodeStats(
   const effectiveSince = filters.since || (() => {
     const d = new Date();
     d.setDate(d.getDate() - 100);
-    return d.toISOString().split('T')[0];
+    return toLocalDateString(d);
   })();
-  const effectiveUntil = filters.until || new Date().toISOString().split('T')[0];
+  const effectiveUntil = filters.until || toLocalDateString(new Date());
+
+  // Always explicitly append times for correct date range inclusion
+  let effectiveSinceVal = effectiveSince;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(effectiveSinceVal)) {
+    effectiveSinceVal += ' 00:00:00';
+  }
   let effectiveUntilVal = effectiveUntil;
   if (/^\d{4}-\d{2}-\d{2}$/.test(effectiveUntilVal)) {
     effectiveUntilVal += ' 23:59:59';
@@ -808,7 +838,7 @@ export async function getCodeStats(
   if (filters.author) {
     args.push(`--author=${filters.author}`);
   }
-  args.push(`--since=${effectiveSince}`, `--until=${effectiveUntilVal}`);
+  args.push(`--since=${effectiveSinceVal}`, `--until=${effectiveUntilVal}`);
 
   let output: string;
   try {
@@ -831,6 +861,7 @@ export async function getCodeStats(
       fileMap: Map<string, number>;
     }>();
     const dailyMap = new Map<string, number>();
+    const hourMap = new Map<number, number>(); // hour 0-23
     const fileMap = new Map<string, number>();
 
     let currentAuthor = '';
@@ -859,8 +890,10 @@ export async function getCodeStats(
 
         const d = new Date(currentTs * 1000);
         entry.weekdays[d.getDay()]++;
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = toLocalDateString(d);
         dailyMap.set(dateStr, (dailyMap.get(dateStr) || 0) + 1);
+        const h = d.getHours();
+        hourMap.set(h, (hourMap.get(h) || 0) + 1);
 
       } else if (line.trim() && currentAuthor) {
         const tabParts = line.split('\t');
@@ -902,12 +935,23 @@ export async function getCodeStats(
     const totalDeletions = contributors.reduce((s, c) => s + c.deletions, 0);
 
     const dailyActivity: DailyActivity[] = [];
-    const startD = new Date(effectiveSince + 'T00:00:00Z');
-    const endD = new Date(effectiveUntil + 'T00:00:00Z');
-    for (let d = new Date(startD); d <= endD; d.setUTCDate(d.getUTCDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0];
+    // Parse dates as LOCAL timezone (YYYY-MM-DD without Z suffix uses local time)
+    const startD = new Date(effectiveSince + 'T00:00:00');
+    const endD = new Date(effectiveUntil + 'T00:00:00');
+    for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+      const dateStr = toLocalDateString(d);
       dailyActivity.push({ date: dateStr, count: dailyMap.get(dateStr) || 0 });
     }
+
+    // Build hourly activity if range is within 1 day
+    const isSingleDayRange = effectiveSince === effectiveUntil;
+    const hourlyActivity: HourlyActivity[] | null = isSingleDayRange
+      ? Array.from({ length: 24 }, (_, h) => ({
+          hour: h,
+          label: String(h).padStart(2, '0') + ':00',
+          count: hourMap.get(h) || 0
+        }))
+      : null;
 
     const topFiles: FileStat[] = Array.from(fileMap.entries())
       .map(([p, changes]) => ({ path: p, changes }))
@@ -921,6 +965,7 @@ export async function getCodeStats(
       totalChanged: totalAdditions + totalDeletions,
       contributors,
       dailyActivity,
+      hourlyActivity,
       topFiles,
       sinceDate: effectiveSince,
       untilDate: effectiveUntil

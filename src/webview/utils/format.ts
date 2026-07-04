@@ -41,6 +41,41 @@ export function formatDateShort(timestamp: number): string {
   return `${month}-${day}`;
 }
 
+export function formatCommitDate(timestamp: number, nowInput?: Date): string {
+  const now = nowInput || new Date();
+  const d = new Date(timestamp * 1000);
+  
+  const isToday = d.getFullYear() === now.getFullYear() &&
+                  d.getMonth() === now.getMonth() &&
+                  d.getDate() === now.getDate();
+                  
+  const hours = String(d.getHours()).padStart(2, '0');
+  
+  if (isToday) {
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${hours}时${minutes}分`;
+  }
+  
+  const isThisMonth = d.getFullYear() === now.getFullYear() &&
+                      d.getMonth() === now.getMonth();
+                      
+  const day = String(d.getDate()).padStart(2, '0');
+  
+  if (isThisMonth) {
+    return `${day}日${hours}时`;
+  }
+  
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const isThisYear = d.getFullYear() === now.getFullYear();
+  
+  if (isThisYear) {
+    return `${month}月${day}日`;
+  }
+  
+  const yearTwoDigit = String(d.getFullYear()).slice(-2);
+  return `${yearTwoDigit}年${month}月`;
+}
+
 export function escapeHtml(str: string | undefined): string {
   if (!str) return '';
   return str
@@ -68,6 +103,13 @@ export function getAvatarColor(name: string | undefined): string {
   return colors[colorIndex];
 }
 
+export function getAvatarGradient(name: string | undefined): string {
+  const baseColor = getAvatarColor(name);
+  const secondaryColor = getAvatarColor(name ? name.split('').reverse().join('') : 'fallback');
+  // Create a mesh-like diagonal gradient
+  return `linear-gradient(135deg, ${baseColor} 0%, ${secondaryColor} 100%)`;
+}
+
 export function getInitials(name: string | undefined): string {
   if (!name) return '';
   name = name.trim();
@@ -87,4 +129,16 @@ export function fmtNum(n: number | undefined | null): string {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
   return n.toString();
+}
+
+/**
+ * Format a Date object to YYYY-MM-DD in LOCAL timezone (not UTC).
+ * This is critical because Git interprets date strings in the user's local timezone.
+ * Using toISOString() gives UTC date, which can be off by one day for users in non-UTC timezones.
+ */
+export function toLocalDateString(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }

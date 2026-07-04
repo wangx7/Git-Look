@@ -25,19 +25,22 @@
   --input-fg: var(--vscode-input-foreground, #cccccc);
   --input-border: var(--vscode-input-border, transparent);
 
-  /* Accent — the single theme-aware highlight colour */
-  --accent: var(--vscode-focusBorder, #007fd4);
+  /* Accent — a vibrant, theme-aware brand/highlight color.
+     Avoid using focusBorder directly, as it can be dull/grey in some clean themes (like Trae deep blue). */
+  --accent: var(--vscode-charts-blue, var(--vscode-activityBarBadge-background, var(--vscode-textLink-foreground, #007fd4)));
   --accent-dim: var(--vscode-button-background, #0e639c);
-  --accent-glow: rgba(0, 127, 212, 0.18);
+  /* accent-glow is NOT a solid color — used only for focus rings, NOT large hover backgrounds */
+  --accent-glow: rgba(128, 128, 128, 0.12);
 
   /* Badge colors for hash badge - use VS Code built-in badge variables for theme compatibility */
   --badge-bg: var(--vscode-badge-background, rgba(128, 128, 128, 0.22));
   --badge-fg: var(--vscode-badge-foreground, var(--vscode-foreground, #cccccc));
   --badge-border: var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
 
-  /* Row states */
-  --row-hover-bg: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
-  --row-selected-bg: var(--vscode-list-activeSelectionBackground, rgba(255, 255, 255, 0.10));
+  /* Row states — neutral gray backgrounds for ANY theme (light/dark/blue/red...)
+     NEVER use accent color for large area backgrounds — blue on blue = invisible in Trae! */
+  --row-hover-bg: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14));
+  --row-selected-bg: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.20));
 
   /* Semantic diff colours */
   --color-add: #3fb950;
@@ -96,12 +99,12 @@ body {
   flex-wrap: nowrap;
   gap: 5px;
   align-items: center;
-  padding: 6px 10px;
-  background-color: var(--surface-1);
-  border-bottom: 1px solid var(--border-color);
+  padding: 0 8px 4px 8px; /* Remove top padding, keep bottom padding */
+  background-color: transparent;
+  border-bottom: none;
   overflow-x: auto;
   flex-shrink: 0;
-  min-height: 38px;
+  min-height: 26px;
 }
 
 .filter-bar::-webkit-scrollbar {
@@ -109,16 +112,19 @@ body {
 }
 
 .filter-group {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background-color: var(--surface-2);
-  border: 1px solid var(--border-subtle);
-  padding: 0 9px;
-  border-radius: var(--radius-md);
-  height: 26px;
+  /* Use input-background instead of surface-2 — surface-2 maps to tabsBackground
+     which is blue in Trae deep-blue theme, causing filter pill to blend in */
+  background-color: transparent;
+  border: 1px solid transparent;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  height: 22px;
   flex-shrink: 0;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: width var(--transition-fast), padding var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .filter-group:hover {
@@ -128,6 +134,53 @@ body {
 .filter-group:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+/* Icon-only (empty) select group styling */
+.filter-group.is-empty {
+  width: 22px;
+  padding: 0;
+  justify-content: center;
+}
+
+.filter-group.is-empty select {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+}
+
+.filter-group.is-empty select option {
+  opacity: 1;
+  color: var(--input-fg);
+  background-color: var(--surface-1);
+}
+
+.filter-group.is-empty label {
+  margin: 0;
+  pointer-events: none;
+  opacity: 0.65;
+  display: flex !important; /* Ensure icons are ALWAYS visible when empty, even in narrow panes */
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.filter-group:not(.is-empty) select {
+  position: relative;
+  opacity: 1;
+  z-index: 1;
+}
+
+.filter-group:not(.is-empty) label {
+  opacity: 0.85;
+  display: flex !important; /* Ensure labels are always shown */
 }
 
 .filter-group label {
@@ -186,36 +239,104 @@ body {
   color-scheme: dark;
 }
 
+/* Collapsing/Expanding Search Input group styling */
 .search-group {
-  width: 130px;
+  width: 22px;
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+  transition: width var(--transition-md), padding var(--transition-md), gap var(--transition-md), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .search-group input {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: width var(--transition-md), opacity var(--transition-md);
+}
+
+.search-group label {
+  display: flex !important; /* Always show search icon */
+  align-items: center;
+  justify-content: center;
+  height: 100%; /* Fix centering issue */
+  cursor: pointer;
+  pointer-events: auto; /* Allow label click to trigger input focus */
+}
+
+/* Expanded state: when focused or contains search value */
+.search-group:focus-within,
+.search-group.has-value {
+  width: 130px;
+  padding: 0 9px;
+  gap: 5px;
+  justify-content: flex-start;
+}
+
+.main-layout.layout-narrow .search-group:focus-within,
+.main-layout.layout-narrow .search-group.has-value {
+  width: 90px;
+  padding: 0 6px;
+}
+
+.search-group:focus-within input,
+.search-group.has-value input {
   width: 100%;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* Reset button */
 #reset-btn {
   height: 26px;
-  padding: 0 9px;
+  width: 26px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
   flex-shrink: 0;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid transparent;
   background-color: transparent;
   color: var(--fg-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 14px;
   font-family: var(--font-family);
   transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
 #reset-btn:hover {
   background-color: var(--row-hover-bg);
-  border-color: var(--border-color);
   color: var(--fg-color);
+}
+
+#toggle-details-btn {
+  height: 26px;
+  width: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-family: var(--font-family);
+  transition: background-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+
+#toggle-details-btn:hover {
+  background-color: var(--row-hover-bg);
+  color: var(--fg-color);
+}
+
+#toggle-details-btn.active,
+.main-layout.right-pane-hidden #toggle-details-btn {
+  color: var(--fg-color);
+  background-color: var(--row-hover-bg);
 }
 
 /* ── Repo selector ──────────────────────────────── */
@@ -272,7 +393,7 @@ body {
 .error-banner {
   background-color: var(--error-bg);
   border: 1px solid var(--error-border);
-  color: #fff;
+  color: var(--vscode-inputValidation-errorForeground, var(--fg-color));
   padding: 6px 10px;
   margin: 6px 10px 0;
   border-radius: var(--radius-sm);
@@ -343,7 +464,7 @@ body {
   min-width: 5px;
   cursor: col-resize;
   background-color: transparent;
-  border-left: 1px solid var(--border-color);
+  border-left: none;
   z-index: 45;
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
@@ -425,6 +546,15 @@ tr.commit-row.selected td.content-col {
   border-left-color: var(--selection-glow-color, var(--accent));
 }
 
+/* Ensure text inside selected rows uses the active selection foreground color for readability */
+tr.commit-row.selected .commit-message,
+tr.commit-row.selected .commit-meta,
+tr.commit-row.selected .commit-hash,
+tr.commit-row.selected .commit-author,
+tr.commit-row.selected .relative-time {
+  color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
+}
+
 /* ── Row content ─────────────────────────────────── */
 .row-content {
   display: flex;
@@ -500,6 +630,13 @@ tr.commit-row.selected td.content-col {
   flex-shrink: 0;
 }
 
+.commit-date-inline {
+  color: var(--fg-muted);
+  font-size: 11px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
 .commit-date {
   width: 116px;
   min-width: 116px;
@@ -533,7 +670,7 @@ tr.commit-row.selected td.content-col {
 
 .hash-copyable:hover {
   color: var(--accent);
-  background-color: var(--accent-glow);
+  background-color: rgba(128, 128, 128, 0.18);
   border-color: var(--accent);
 }
 
@@ -596,9 +733,9 @@ tr.commit-row.selected td.content-col {
 }
 
 .badge-head {
-  background-color: rgba(255, 255, 255, 0.10);
-  color: var(--fg-color);
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background-color: var(--badge-bg);
+  color: var(--badge-fg);
+  border: 1px solid var(--badge-border);
   font-weight: 700;
 }
 
@@ -626,9 +763,9 @@ tr.commit-row.selected td.content-col {
   color: var(--fg-faint);
 }
 
-.empty-state .codicon {
-  font-size: 30px;
+.empty-state .empty-state-svg {
   opacity: 0.35;
+  margin-bottom: 8px;
 }
 
 /* ══════════════════════════════════════════════════
@@ -663,7 +800,7 @@ tr.commit-row.selected td.content-col {
 .details-pane {
   width: 380px;
   min-width: 280px;
-  max-width: 60%;
+  max-width: 72%;
   height: 100%;
   background-color: var(--surface-1);
   display: flex;
@@ -709,8 +846,21 @@ tr.commit-row.selected td.content-col {
   flex-direction: column;
   gap: 12px;
   height: 100%;
-  overflow: hidden;
+  overflow-y: auto;
   animation: slideInFromRight 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.details-content::-webkit-scrollbar {
+  width: 5px;
+}
+
+.details-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.details-content::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.20);
+  border-radius: 3px;
 }
 
 /* ── Detail header section ───────────────────────── */
@@ -718,9 +868,8 @@ tr.commit-row.selected td.content-col {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
   padding-bottom: 12px;
-  padding-right: 32px;
   flex-shrink: 0;
 }
 
@@ -897,9 +1046,9 @@ tr.commit-row.selected td.content-col {
 }
 
 .open-all-changes-btn.compact-btn:hover {
-  background-color: var(--accent-glow);
-  border-color: var(--accent);
-  color: var(--accent);
+  background-color: var(--row-hover-bg);
+  border-color: var(--border-color);
+  color: var(--fg-color);
 }
 
 /* Files section */
@@ -908,21 +1057,8 @@ tr.commit-row.selected td.content-col {
   flex-direction: column;
   gap: 6px;
   flex: 1;
-  overflow-y: auto;
+  overflow: visible;
   min-height: 0;
-}
-
-.details-files-section::-webkit-scrollbar {
-  width: 5px;
-}
-
-.details-files-section::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.details-files-section::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.20);
-  border-radius: 3px;
 }
 
 /* ══════════════════════════════════════════════════
@@ -1159,7 +1295,7 @@ tr.commit-row.selected td.content-col {
 
 .action-btn:hover {
   opacity: 1;
-  background-color: var(--accent-glow);
+  background-color: var(--row-hover-bg);
   color: var(--accent);
 }
 
@@ -1449,12 +1585,7 @@ svg#graph-svg .merge-inner.hovered {
 }
 
 .overview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 32px 8px 14px;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
+  display: none !important;
 }
 
 .overview-title {
@@ -1467,8 +1598,9 @@ svg#graph-svg .merge-inner.hovered {
 }
 
 .overview-title .codicon {
-  color: var(--accent);
-  font-size: 13px;
+  color: var(--fg-muted);
+  font-size: 14px;
+  opacity: 0.8;
 }
 
 .overview-range {
@@ -1515,10 +1647,12 @@ svg#graph-svg .merge-inner.hovered {
 }
 
 .stat-card-value {
-  font-size: 17px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--fg-color);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1574,8 +1708,8 @@ svg#graph-svg .merge-inner.hovered {
   width: 100%;
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: rgba(128, 128, 128, 0.04);
-  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border: none;
   position: relative;
 }
 
@@ -1591,6 +1725,7 @@ svg#graph-svg .merge-inner.hovered {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  margin-left: -16px; /* Shift further left to offset 10px padding + right-aligned rank width */
 }
 
 .contributor-row {
@@ -1599,15 +1734,18 @@ svg#graph-svg .merge-inner.hovered {
   gap: 4px;
   padding: 7px 10px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  background: rgba(128, 128, 128, 0.04);
+  border: 1px solid transparent;
+  background: transparent;
   cursor: pointer;
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .contributor-row:hover {
   background-color: var(--row-hover-bg);
-  border-color: var(--border-color);
+}
+
+.contributor-row:hover .contributor-name {
+  color: var(--fg-color);
 }
 
 .contributor-row-top {
@@ -1705,20 +1843,29 @@ svg#graph-svg .merge-inner.hovered {
   cursor: pointer;
 }
 
-.top-file-row-clickable:hover .top-file-name {
-  color: var(--accent);
+.top-file-row:hover .top-file-name {
+  color: var(--fg-color);
 }
 
-.top-file-row-clickable:hover .top-file-open-icon {
+.top-file-row:hover .top-file-count {
+  color: var(--fg-color);
+}
+
+.top-file-row:hover .top-file-bar-fill {
+  opacity: 0.75;
+}
+
+.top-file-row:hover .top-file-open-icon {
   opacity: 1;
+  color: var(--fg-color);
 }
 
 .top-file-open-icon {
   font-size: 11px;
   opacity: 0;
-  color: var(--accent);
+  color: var(--fg-muted);
   flex-shrink: 0;
-  transition: opacity var(--transition-fast);
+  transition: opacity var(--transition-fast), color var(--transition-fast);
 }
 
 .top-file-name {
@@ -1745,9 +1892,10 @@ svg#graph-svg .merge-inner.hovered {
 
 .top-file-bar-fill {
   height: 100%;
-  background: var(--accent);
+  background: var(--fg-muted);
   border-radius: 2px;
-  opacity: 0.6;
+  opacity: 0.45;
+  transition: opacity var(--transition-fast);
 }
 
 .top-file-count {
@@ -1785,10 +1933,43 @@ svg#graph-svg .merge-inner.hovered {
 }
 
 .author-stats-header {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 0 12px;
+  min-height: 38px;
+  border-bottom: none;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+
+.author-stats-header .selection-history-title {
+  display: none !important;
+}
+
+.author-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.author-back-btn:hover {
+  color: var(--fg-color);
+  background: var(--row-hover-bg);
+}
+
+.author-back-btn .codicon {
+  font-size: 14px;
+}
+
 
 .back-btn {
   display: inline-flex;
@@ -1966,9 +2147,9 @@ svg#graph-svg .merge-inner.hovered {
 }
 
 .author-highlight-btn:hover {
-  background-color: var(--accent-glow);
-  border-color: var(--accent);
-  color: var(--accent);
+  background-color: var(--row-hover-bg);
+  border-color: var(--border-color);
+  color: var(--fg-color);
 }
 
 .author-highlight-btn .codicon {
@@ -2008,21 +2189,12 @@ svg#graph-svg .merge-inner.hovered {
   display: inline;
 }
 
-/* 搜索框：不再撑满剩余宽度，与其他 filter-group 等宽 */
-.left-pane.pane-medium .search-group {
-  flex-grow: 0;
-  min-width: unset;
-  width: auto;
-}
 
-.left-pane.pane-medium .search-group input {
-  width: 55px;
-}
-
-/* filter-group 图标全部隐藏 */
+/* filter-group 图标全部隐藏 (已由图标过滤替代)
 .left-pane.pane-medium .filter-group label {
   display: none;
 }
+*/
 
 /* filter-bar 整体压缩：更小间距 + 更低高度 */
 .left-pane.pane-medium .filter-bar {
@@ -2095,16 +2267,15 @@ svg#graph-svg .merge-inner.hovered {
   display: none;
 }
 
+.left-pane.pane-narrow .commit-date-inline {
+  display: none;
+}
+
 /* filter-bar select 宽度限制，防止溢出 */
 .left-pane.pane-narrow .filter-group select {
   max-width: 80px;
 }
 
-/* 搜索框最小宽度放宽 */
-.left-pane.pane-narrow .search-group {
-  min-width: 60px;
-  width: auto;
-}
 
 /* ══════════════════════════════════════════════════
    RESPONSIVE: VERTICAL STACKING MODE (整体宽度 < 550px)
@@ -2156,35 +2327,14 @@ svg#graph-svg .merge-inner.hovered {
   transform: none !important;
   box-shadow: none !important;
   border-left: none !important;
-  border-top: 1px solid var(--border-color);
+  border-top: none;
 }
 
 .overlay-backdrop {
   display: none !important;
 }
 
-.details-close-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  z-index: 150;
-  transition: color var(--transition-fast), background-color var(--transition-fast);
-}
 
-.details-close-btn:hover {
-  background-color: var(--row-hover-bg);
-  color: var(--fg-color);
-}
 
 /* ── filter-bar 窄屏样式 ──────────────── */
 .main-layout.layout-narrow .filter-bar {
@@ -2205,9 +2355,11 @@ svg#graph-svg .merge-inner.hovered {
   max-width: 90px;
 }
 
+/*
 .main-layout.layout-narrow .filter-bar .filter-group label {
   display: none;
 }
+*/
 
 /* ── Selection History Panel [NEW] ── */
 .selection-history {
@@ -2219,12 +2371,7 @@ svg#graph-svg .merge-inner.hovered {
 }
 
 .selection-history-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px 8px;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
+  display: none !important;
 }
 
 .selection-history-title {
@@ -2237,15 +2384,7 @@ svg#graph-svg .merge-inner.hovered {
 }
 
 .selection-file-info {
-  padding: 6px 12px;
-  background-color: rgba(128, 128, 128, 0.06);
-  border-bottom: 1px solid var(--border-color);
-  color: var(--fg-muted);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  word-break: break-all;
-  flex-shrink: 0;
-  line-height: 1.4;
+  display: none;
 }
 
 .history-list {
@@ -2257,76 +2396,114 @@ svg#graph-svg .merge-inner.hovered {
   gap: 8px;
 }
 
-/* History Card Item */
+/* History Card Item — aligns visual language with commit-rows (left accent bar when selected) */
 .history-card {
-  background-color: rgba(128, 128, 128, 0.04);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-left: 3px solid transparent;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   padding: 8px 10px;
+  margin-left: -3px;
   cursor: pointer;
   transition: all var(--transition-fast);
   display: flex;
   flex-direction: column;
   gap: 4px;
+  position: relative;
 }
 
 .history-card:hover {
   background-color: var(--row-hover-bg);
-  border-color: var(--accent);
 }
 
 .history-card.active {
   background-color: var(--row-selected-bg);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-left-color: var(--accent);
+}
+
+.history-card-layout {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.history-card-avatar-col {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.history-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
 }
 
 .history-card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.history-card-header-left {
-  display: flex;
+.history-card-avatar {
+  flex-shrink: 0;
+  font-weight: 600;
+  border: none !important;
+  box-shadow: none !important;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
+  justify-content: center;
 }
 
 .history-card-hash-badge {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--fg-muted);
-  background-color: rgba(128, 128, 128, 0.12);
-  padding: 1px 6px;
-  border-radius: 3px;
+  background-color: transparent;
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  padding: 0 7px;
+  border-radius: 99px;
   user-select: none;
   letter-spacing: 0.02em;
   flex-shrink: 0;
   font-weight: 400;
-  opacity: 0.8;
+  line-height: 16px;
+  display: inline-flex;
+  align-items: center;
   transition: all var(--transition-fast);
+}
+
+.history-card-hash-badge:hover {
+  color: var(--accent);
+  background-color: rgba(128, 128, 128, 0.1);
+  border-color: var(--accent);
 }
 
 .history-card-author {
   font-weight: 600;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-color);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+  max-width: 140px;
+}
+
+.history-card-date {
+  font-size: 11px;
+  color: var(--fg-faint);
+  margin-left: auto;
 }
 
 .history-card-date {
   font-size: 10px;
+  line-height: 20px;
   color: var(--fg-faint);
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
 }
 
 .history-card-msg {
@@ -2358,9 +2535,7 @@ svg#graph-svg .merge-inner.hovered {
 }
 
 .file-blame-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: none !important;
 }
 
 .file-blame-title {
@@ -2400,20 +2575,16 @@ svg#graph-svg .merge-inner.hovered {
 
 .rose-chart-tooltip {
   position: absolute;
-  background-color: var(--vscode-editorHoverWidget-background);
-  /* Enhance glassmorphism effect */
-  background: rgba(var(--vscode-editorHoverWidget-background-rgb, 30, 30, 30), 0.85);
-  border: 1px solid var(--vscode-editorHoverWidget-border);
+  background-color: var(--vscode-editorHoverWidget-background, var(--surface-1));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--border-color));
   border-radius: 12px;
   padding: 12px 14px;
   font-size: 12px;
-  color: var(--vscode-editorHoverWidget-foreground);
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg-color));
   pointer-events: none;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   z-index: 1000;
   transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  backdrop-filter: blur(16px) saturate(120%);
-  -webkit-backdrop-filter: blur(16px) saturate(120%);
   min-width: 220px;
   transform: translate(-50%, -100%);
   margin-top: -12px;

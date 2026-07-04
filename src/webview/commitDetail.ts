@@ -1,15 +1,16 @@
 import { state } from './state';
 import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, escapeHtml, hexToRgba, getAvatarColor, getInitials, fmtNum } from './utils/format';
+import { getRelativeTime, formatDate, escapeHtml, getAvatarColor, getAvatarGradient, getInitials } from './utils/format';
 import { RightPaneState } from './types';
 import { getFileIconInfo } from './utils/fileIcons';
 import { constants } from './constants';
 import { setRightPane, setRightPaneVisible, ensureDetailsExpanded } from './rightPane';
-import { requestStats, hideLoading, showLoading } from './dataLoader';
+import { showLoading } from './dataLoader';
 
-import { selectCircleInGraph, drawSvg } from './svgRenderer';
+import { selectCircleInGraph } from './svgRenderer';
 import { saveCurrentState } from './dataLoader';
 import { getFilters } from './filters';
+import { renderDetailBadges } from './badgeRenderer';
 
 let requestVirtualListUpdate: (() => void) | null = null;
 
@@ -55,71 +56,13 @@ export function handleRowClick(row, hash, parents) {
 
     const initials = getInitials(commit.author);
     elements.detailAuthorAvatar.textContent = initials;
-    elements.detailAuthorAvatar.style.backgroundColor = getAvatarColor(commit.author);
+    elements.detailAuthorAvatar.style.background = getAvatarGradient(commit.author);
   }
 
   // Render all branch badges in detail panel
   const branchesContainer = document.getElementById('detail-branches-container');
   if (branchesContainer) {
-    branchesContainer.innerHTML = '';
-
-    // 先展示显式 decorations（HEAD、分支名、tag 等）
-    let hasBadges = false;
-    if (commit.decorations && commit.decorations.length > 0) {
-      hasBadges = true;
-      branchesContainer.classList.remove('hidden');
-      commit.decorations.forEach(dec => {
-        let badgeClass = 'badge-branch';
-        let iconHtml = '<i class="codicon codicon-git-branch"></i>';
-        let badgeColor = state.branchColorMap.get(dec) || colors[0];
-        let isHead = false;
-        const isRemote = state.remoteBranches.includes(dec) || dec.startsWith('origin/');
-        let displayDec = dec;
-
-        if (dec.startsWith('tag: ')) {
-          badgeClass = 'badge-tag';
-          iconHtml = '<i class="codicon codicon-tag"></i>';
-          displayDec = dec.substring(5);
-          badgeColor = '#f59e0b';
-        } else if (isRemote) {
-          badgeClass = 'badge-remote-branch';
-          iconHtml = '<i class="codicon codicon-cloud"></i>';
-        } else if (dec === 'HEAD') {
-          badgeClass = 'badge-head';
-          iconHtml = '<i class="codicon codicon-circle-filled"></i>';
-          isHead = true;
-        }
-
-        const style = isHead
-          ? `background-color: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.22);`
-          : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor}; border-color: ${hexToRgba(badgeColor, 0.35)};`;
-
-        const span = document.createElement('span');
-        span.className = `ref-badge ${badgeClass}`;
-        span.style.cssText = style;
-        span.innerHTML = `${iconHtml}${escapeHtml(displayDec)}`;
-        branchesContainer.appendChild(span);
-      });
-    }
-
-    // 补充 lane 推断的分支名（仅当该分支名尚未在 decorations 中出现时）
-    const laneBranch = state.commitBranchLabel[hash];
-    if (laneBranch && laneBranch.name) {
-      const alreadyShown = commit.decorations && commit.decorations.includes(laneBranch.name);
-      if (!alreadyShown) {
-        hasBadges = true;
-        branchesContainer.classList.remove('hidden');
-        const span = document.createElement('span');
-        span.className = 'ref-badge badge-branch';
-        span.style.cssText = `background-color: ${hexToRgba(laneBranch.color, 0.15)}; color: ${laneBranch.color}; border-color: ${hexToRgba(laneBranch.color, 0.35)};`;
-        span.innerHTML = `<i class="codicon codicon-git-branch"></i>${escapeHtml(laneBranch.name)}`;
-        branchesContainer.appendChild(span);
-      }
-    }
-
-    if (!hasBadges) {
-      branchesContainer.classList.add('hidden');
-    }
+    renderDetailBadges(commit, hash, branchesContainer);
   }
 
   if (commit.parents && commit.parents.length >= 2) {

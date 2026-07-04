@@ -24,13 +24,28 @@ export interface ContributorStats {
   topFiles?: any[];
 }
 
+export interface DailyActivity {
+  date: string;
+  count: number;
+}
+
+export interface HourlyActivity {
+  hour: number;
+  label: string;
+  count: number;
+}
+
 export interface CodeStats {
   totalCommits: number;
   totalAdditions: number;
   totalDeletions: number;
+  totalChanged?: number;
   contributors: ContributorStats[];
-  dailyActivity: Record<string, number>;
-  topFiles: { path: string; count: number }[];
+  dailyActivity: DailyActivity[];
+  hourlyActivity: HourlyActivity[] | null;
+  topFiles: { path: string; changes?: number; count?: number }[];
+  sinceDate?: string;
+  untilDate?: string;
 }
 
 export interface RepoInfo {

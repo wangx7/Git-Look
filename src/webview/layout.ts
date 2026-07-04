@@ -96,9 +96,15 @@ export function initLayout() {
   if (overlayBackdrop) {
     overlayBackdrop.addEventListener('click', closeOverlay);
   }
-  if (elements.detailsCloseBtn) {
-    elements.detailsCloseBtn.addEventListener('click', () => {
-      setRightPaneVisible(0);
+
+
+  if (elements.toggleDetailsBtn) {
+    elements.toggleDetailsBtn.addEventListener('click', () => {
+      if (state.rightPaneVisible === 0) {
+        setRightPaneVisible(1);
+      } else {
+        setRightPaneVisible(0);
+      }
       saveCurrentState();
     });
   }
@@ -135,35 +141,15 @@ export function initLayout() {
       if (resizeTimer) cancelAnimationFrame(resizeTimer);
       resizeTimer = requestAnimationFrame(() => {
         if (state.currentStatsData && state.currentStatsData.dailyActivity) {
-          renderActivityChart(state.currentStatsData.dailyActivity);
+          const s = state.currentStatsData;
+          if (s.hourlyActivity) {
+            renderActivityChart(s.hourlyActivity, 'hourly');
+          } else {
+            renderActivityChart(s.dailyActivity, 'daily');
+          }
         }
       });
     });
     chartObserver.observe(elements.activitySvg.parentElement);
-  }
-
-  const containerContainer = document.querySelector('.container');
-  if (containerContainer) {
-    containerContainer.addEventListener('click', (e: any) => {
-      if (state.getRightPaneStateNumber() === 3 || state.getRightPaneStateNumber() === 4) {
-        return; 
-      }
-      if (!e.target || !e.target.closest) return;
-
-      const inSvg = e.target.closest('#graph-svg');
-      const inList = e.target.closest('.list-pane');
-      const isRow = e.target.closest('.commit-row');
-      const isNode = e.target.closest('.commit-node');
-
-      if ((inSvg || inList) && !isRow && !isNode) {
-        if (state.rightPaneVisible === 1) {
-          setRightPaneVisible(0);
-          saveCurrentState();
-        }
-        if (state.selectedCommitHash) {
-          import('./commitDetail').then(({ collapseDetail }) => collapseDetail());
-        }
-      }
-    });
   }
 }
