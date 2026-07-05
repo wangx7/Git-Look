@@ -2,7 +2,7 @@
   "name": "git-visual",
   "displayName": "Git 潮汐树",
   "description": "Git 可视化工具。提供分支潮汐树、行作者、选区历史、文件历史、提交数据分析功能。",
-  "version": "1.1.0",
+  "version": "1.1.7",
   "publisher": "wangx123",
   "author": "wangx7",
   "license": "MIT",

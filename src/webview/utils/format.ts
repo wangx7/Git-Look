@@ -1,16 +1,16 @@
 export const colors = [
-  '#d4a373', // 黄河沙金 (Yellow River Silt Gold)
-  '#b83b3b', // 碱蓬红毯 (Suaeda Crimson)
-  '#2a9d8f', // 潮沟青碧 (Tidal Creek Teal)
-  '#1b4965', // 渤海深蓝 (Bohai Deep Blue)
-  '#824c96', // 滩涂晚霞紫 (Mudflat Dusk Purple)
-  '#52796f', // 芦苇绿 (Reed Marsh Green)
-  '#e76f51', // 晚霞橙 (Sunset Orange)
-  '#457b9d', // 潮汐溪流蓝 (Tidal Creek Sky Blue)
-  '#a87c55', // 滩涂褐 (Mudflat Sand)
-  '#b54d32', // 泥沙红 (Silt Terracotta)
-  '#264653', // 深海黛 (Sea Midnight Navy)
-  '#98b06c'  // 碱蓬绿 (Suaeda Spring Green)
+  '#3b82f6', // modern blue
+  '#10b981', // emerald green
+  '#f59e0b', // amber yellow
+  '#8b5cf6', // violet purple
+  '#ec4899', // pink
+  '#06b6d4', // cyan
+  '#f97316', // orange
+  '#14b8a6', // teal
+  '#a855f7', // purple
+  '#84cc16', // lime
+  '#6366f1', // indigo
+  '#ef4444'  // red
 ];
 
 export function getRelativeTime(timestamp: number): string {
@@ -44,34 +44,34 @@ export function formatDateShort(timestamp: number): string {
 export function formatCommitDate(timestamp: number, nowInput?: Date): string {
   const now = nowInput || new Date();
   const d = new Date(timestamp * 1000);
-  
+
   const isToday = d.getFullYear() === now.getFullYear() &&
-                  d.getMonth() === now.getMonth() &&
-                  d.getDate() === now.getDate();
-                  
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+
   const hours = String(d.getHours()).padStart(2, '0');
-  
+
   if (isToday) {
     const minutes = String(d.getMinutes()).padStart(2, '0');
     return `${hours}时${minutes}分`;
   }
-  
+
   const isThisMonth = d.getFullYear() === now.getFullYear() &&
-                      d.getMonth() === now.getMonth();
-                      
+    d.getMonth() === now.getMonth();
+
   const day = String(d.getDate()).padStart(2, '0');
-  
+
   if (isThisMonth) {
     return `${day}日${hours}时`;
   }
-  
+
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const isThisYear = d.getFullYear() === now.getFullYear();
-  
+
   if (isThisYear) {
     return `${month}月${day}日`;
   }
-  
+
   const yearTwoDigit = String(d.getFullYear()).slice(-2);
   return `${yearTwoDigit}年${month}月`;
 }
