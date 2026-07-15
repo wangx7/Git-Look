@@ -26,14 +26,24 @@ function getAllPaneElements(): (HTMLElement | null)[] {
 export function setRightPane(paneState: any) {
   state.rightPaneState = paneState;
 
-  // Hide all pane elements
-  getAllPaneElements().forEach(el => el?.classList.add('hidden'));
+  // Hide all pane elements and remove animation class
+  getAllPaneElements().forEach(el => {
+    if (el) {
+      el.classList.add('hidden');
+      el.classList.remove('pane-animate');
+    }
+  });
 
-  // Show the target pane element
+  // Show the target pane element and trigger fade-in animation
   const getter = paneElementMap[paneState];
   if (getter) {
     const el = getter();
-    el?.classList.remove('hidden');
+    if (el) {
+      el.classList.remove('hidden');
+      // Trigger reflow to restart CSS animation
+      void el.offsetWidth;
+      el.classList.add('pane-animate');
+    }
   }
 
   // Auto-expand when a view is activated (except for loading)

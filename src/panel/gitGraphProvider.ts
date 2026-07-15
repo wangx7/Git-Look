@@ -19,25 +19,29 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _fileHistoryGeneration = 0;
   private _lastFileHistoryPath?: string;
   private _repoDisposables: vscode.Disposable[] = [];
+  private _isWebviewReady = false;
+  private _messageQueue: any[] = [];
 
-  public showFileBlameStats(fileName: string, stats: { author: string; lines: number }[]) {
-    if (this._view) {
-      this._view.webview.postMessage({
-        type: 'showFileBlameStats',
-        fileName,
-        stats
-      });
-      // Try to show the view but preserve focus in the editor
-      // this._view.show(true); // Requires VS Code 1.67+, but might not be necessary if the panel is already visible
+  private _postMessage(message: any) {
+    if (this._view && this._isWebviewReady) {
+      this._view.webview.postMessage(message);
+    } else {
+      this._messageQueue.push(message);
     }
   }
 
+  public showFileBlameStats(fileName: string, stats: { author: string; lines: number }[]) {
+    this._postMessage({
+      type: 'showFileBlameStats',
+      fileName,
+      stats
+    });
+  }
+
   public clearFileBlameStats() {
-    if (this._view) {
-      this._view.webview.postMessage({
-        type: 'clearFileBlameStats'
-      });
-    }
+    this._postMessage({
+      type: 'clearFileBlameStats'
+    });
   }
 
   constructor(
@@ -55,6 +59,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
+    this._isWebviewReady = false;
 
     webviewView.onDidDispose(() => {
       this._disposeGitWatcher();
@@ -65,6 +70,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
       this._fileHistoryActive = false;
       this._repoDisposables.forEach(d => { try { d.dispose(); } catch { /* ignore */ } });
       this._repoDisposables = [];
+      this._isWebviewReady = false;
+      this._messageQueue = [];
     });
 
     webviewView.webview.options = {
@@ -96,6 +103,16 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage(async (data) => {
       // Handle repo management commands first (no git root needed)
       switch (data.command) {
+        case 'ready': {
+          this._isWebviewReady = true;
+          while (this._messageQueue.length > 0) {
+            const msg = this._messageQueue.shift();
+            if (this._view) {
+              this._view.webview.postMessage(msg);
+            }
+          }
+          return;
+        }
         case 'getRepos': {
           this._sendReposToWebview(false);
           return;
@@ -599,41 +616,41 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
 
   public refresh() {
     if (this._view && this._view.visible) {
-      this._view.webview.postMessage({ type: 'refresh' });
+      this._postMessage({ type: 'refresh' });
     }
   }
 
   public focusCommit(hash: string) {
     if (this._view) {
       this._view.show(true); // Bring panel view to focus
-      this._view.webview.postMessage({ type: 'focusCommit', hash });
     }
+    this._postMessage({ type: 'focusCommit', hash });
   }
 
   public showSelectionHistory(data: { filePath: string, startLine: number, endLine: number, commits: any[] }) {
     if (this._view) {
       this._view.show(true); // Bring panel view to focus
-      this._view.webview.postMessage({
-        type: 'showHistory',
-        filePath: data.filePath,
-        startLine: data.startLine,
-        endLine: data.endLine,
-        commits: data.commits
-      });
     }
+    this._postMessage({
+      type: 'showHistory',
+      filePath: data.filePath,
+      startLine: data.startLine,
+      endLine: data.endLine,
+      commits: data.commits
+    });
   }
 
   public showFileHistory(data: { filePath: string, commits: any[] }) {
+    this._fileHistoryActive = true;
+    this._lastFileHistoryPath = data.filePath;
     if (this._view) {
-      this._fileHistoryActive = true;
-      this._lastFileHistoryPath = data.filePath;
       this._view.show(true); // Bring panel view to focus
-      this._view.webview.postMessage({
-        type: 'showFileHistory',
-        filePath: data.filePath,
-        commits: data.commits
-      });
     }
+    this._postMessage({
+      type: 'showFileHistory',
+      filePath: data.filePath,
+      commits: data.commits
+    });
   }
 
   private _onActiveEditorChanged() {
@@ -739,8 +756,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         });
       }
 
-      if (this._view && generation === this._fileHistoryGeneration) {
-        this._view.webview.postMessage({
+      if (generation === this._fileHistoryGeneration) {
+        this._postMessage({
           type: 'showFileHistory',
           filePath: repoFilePath,
           commits: commitsToSend
@@ -759,11 +776,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
    * @param needsReload If true, the webview should reload data (e.g. after repo switch).
    */
   private _sendReposToWebview(needsReload: boolean) {
-    if (!this._view) {
-      return;
-    }
     const repos = this._repoManager.repos.map(r => ({ root: r.root, name: r.name }));
-    this._view.webview.postMessage({
+    this._postMessage({
       type: 'reposLoaded',
       repos,
       selectedIndex: this._repoManager.selectedIndex,

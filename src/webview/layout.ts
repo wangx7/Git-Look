@@ -23,28 +23,48 @@ export function initLayout() {
       // Stacking mode (vertical resizing)
       const containerHeight = layoutEl.clientHeight;
       const detailsHeight = containerHeight - e.clientY;
-      const minHeight = 80;
+      const collapseThreshold = 50;
+      const minHeight = 50;
       const maxHeight = containerHeight * 0.8;
-      let finalHeight = Math.max(minHeight, Math.min(maxHeight, detailsHeight));
 
-      elements.detailsPane.style.height = finalHeight + 'px';
-      elements.detailsPane.style.width = '100%';
+      if (detailsHeight < collapseThreshold) {
+        if (state.rightPaneVisible !== 0) {
+          setRightPaneVisible(0);
+        }
+      } else {
+        if (state.rightPaneVisible === 0) {
+          setRightPaneVisible(1);
+        }
+        let finalHeight = Math.max(minHeight, Math.min(maxHeight, detailsHeight));
+        elements.detailsPane.style.height = (finalHeight - 12) + 'px';
+        elements.detailsPane.style.width = '100%';
 
-      const leftPaneHeight = containerHeight - finalHeight - 4;
-      elements.leftPaneEl.style.height = leftPaneHeight + 'px';
-      elements.leftPaneEl.style.flex = 'none';
+        const leftPaneHeight = containerHeight - finalHeight - 4;
+        elements.leftPaneEl.style.height = leftPaneHeight + 'px';
+        elements.leftPaneEl.style.flex = 'none';
+      }
     } else {
       // Horizontal mode
       const containerWidth = layoutEl.clientWidth;
       const detailsWidth = containerWidth - e.clientX;
-      const minWidth = 280;
-      const maxWidth = containerWidth * 0.6;
-      let finalWidth = Math.max(minWidth, Math.min(maxWidth, detailsWidth));
+      const collapseThreshold = 80;
+      const minWidth = 80;
+      const maxWidth = containerWidth * 0.7;
 
-      elements.detailsPane.style.width = finalWidth + 'px';
-      elements.detailsPane.style.height = '100%';
-      elements.leftPaneEl.style.height = '100%';
-      elements.leftPaneEl.style.flex = '1';
+      if (detailsWidth < collapseThreshold) {
+        if (state.rightPaneVisible !== 0) {
+          setRightPaneVisible(0);
+        }
+      } else {
+        if (state.rightPaneVisible === 0) {
+          setRightPaneVisible(1);
+        }
+        let finalWidth = Math.max(minWidth, Math.min(maxWidth, detailsWidth));
+        elements.detailsPane.style.width = (finalWidth - 12) + 'px';
+        elements.detailsPane.style.height = '100%';
+        elements.leftPaneEl.style.height = '100%';
+        elements.leftPaneEl.style.flex = '1';
+      }
     }
   });
 
@@ -97,17 +117,6 @@ export function initLayout() {
     overlayBackdrop.addEventListener('click', closeOverlay);
   }
 
-
-  if (elements.toggleDetailsBtn) {
-    elements.toggleDetailsBtn.addEventListener('click', () => {
-      if (state.rightPaneVisible === 0) {
-        setRightPaneVisible(1);
-      } else {
-        setRightPaneVisible(0);
-      }
-      saveCurrentState();
-    });
-  }
 
   if (elements.mainLayoutEl && window.ResizeObserver) {
     const layoutObserver = new ResizeObserver(entries => {

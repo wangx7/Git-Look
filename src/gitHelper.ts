@@ -1002,7 +1002,7 @@ export async function hasFileLocalModifications(
       // Ignore
     }
     const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
-    const diffOutput = await execGit(['diff', 'HEAD', '--', repoFilePath], gitRoot);
+    const diffOutput = await execGit(['diff', '--name-only', 'HEAD', '--', repoFilePath], gitRoot);
     return diffOutput.trim().length > 0;
   } catch (e) {
     console.error('Error checking file local modifications:', e);

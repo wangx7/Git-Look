@@ -13,8 +13,8 @@ export const colors = [
   '#ef4444'  // red
 ];
 
-export function getRelativeTime(timestamp: number): string {
-  const now = Math.floor(Date.now() / 1000);
+export function getRelativeTime(timestamp: number, nowInput?: Date): string {
+  const now = nowInput ? Math.floor(nowInput.getTime() / 1000) : Math.floor(Date.now() / 1000);
   const diff = now - timestamp;
   if (diff < 60) return '刚刚';
   if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
@@ -42,38 +42,7 @@ export function formatDateShort(timestamp: number): string {
 }
 
 export function formatCommitDate(timestamp: number, nowInput?: Date): string {
-  const now = nowInput || new Date();
-  const d = new Date(timestamp * 1000);
-
-  const isToday = d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-
-  const hours = String(d.getHours()).padStart(2, '0');
-
-  if (isToday) {
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${hours}时${minutes}分`;
-  }
-
-  const isThisMonth = d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth();
-
-  const day = String(d.getDate()).padStart(2, '0');
-
-  if (isThisMonth) {
-    return `${day}日${hours}时`;
-  }
-
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const isThisYear = d.getFullYear() === now.getFullYear();
-
-  if (isThisYear) {
-    return `${month}月${day}日`;
-  }
-
-  const yearTwoDigit = String(d.getFullYear()).slice(-2);
-  return `${yearTwoDigit}年${month}月`;
+  return getRelativeTime(timestamp, nowInput);
 }
 
 export function escapeHtml(str: string | undefined): string {

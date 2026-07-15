@@ -47,7 +47,7 @@ function init() {
   });
 
   window.addEventListener('detailsExpanded', () => {
-    import('./svgRenderer').then(({ drawSvg }) => drawSvg(state.lastStartIndex || 0, state.lastEndIndex || state.commits.length - 1));
+    import('./svgRenderer').then(({ drawSvg }) => drawSvg(state.lastStartIndex || 0, state.lastEndIndex || state.commits.length - 1)).catch(err => console.error('Failed to load svgRenderer module:', err));
     if (state.currentStatsData && state.currentStatsData.dailyActivity) {
       import('./statsCharts').then(({ renderActivityChart }) => {
         const s = state.currentStatsData;
@@ -56,7 +56,7 @@ function init() {
         } else {
           renderActivityChart(s.dailyActivity, 'daily');
         }
-      });
+      }).catch(err => console.error('Failed to load statsCharts module:', err));
     }
   });
 
@@ -78,7 +78,7 @@ function init() {
         import('./statsCharts').then(({ renderOverviewStats }) => {
             renderOverviewStats(state.currentStatsData);
             setRightPane(RightPaneState.OVERVIEW);
-        });
+        }).catch(err => console.error('Failed to load statsCharts module:', err));
       }
     });
   }
@@ -90,7 +90,7 @@ function init() {
         import('./statsCharts').then(({ renderOverviewStats }) => {
           renderOverviewStats(state.currentStatsData);
           setRightPane(RightPaneState.OVERVIEW);
-        });
+        }).catch(err => console.error('Failed to load statsCharts module:', err));
       }
     });
   }
@@ -185,6 +185,9 @@ function init() {
     // Initial load
     reloadData(true);
   }
+
+  // Notify extension host that webview is ready
+  vscode.postMessage({ command: 'ready' });
 }
 
 init();

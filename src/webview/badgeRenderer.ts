@@ -43,7 +43,7 @@ export function makeBadgeHtml(dec: string, overrideLabel?: string): string {
     : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor}; border-color: ${hexToRgba(badgeColor, 0.35)};`;
 
   const styleAttr = style ? ` style="${style}"` : '';
-  return `<span class="ref-badge ${badgeClass}"${styleAttr}>${iconHtml}${escapeHtml(displayDec)}</span>`;
+  return `<span class="ref-badge ${badgeClass}"${styleAttr}>${iconHtml}<span class="badge-text">${escapeHtml(displayDec)}</span></span>`;
 }
 
 /**

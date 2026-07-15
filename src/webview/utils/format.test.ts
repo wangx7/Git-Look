@@ -15,29 +15,27 @@ describe('Format Utils', () => {
     expect(formatted).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
   });
 
-  it('formatCommitDate should format dates according to context rules', () => {
+  it('formatCommitDate should format dates relative to reference time', () => {
     // Mock "now" as 2026-07-04 12:00:00 local time
     const mockNow = new Date(2026, 6, 4, 12, 0, 0); // Month is 0-indexed, so 6 is July
 
-    // Case 1: Today (2026-07-04 08:30:00 local)
-    const todayDate = new Date(2026, 6, 4, 8, 30, 0);
-    const todayTimestamp = Math.floor(todayDate.getTime() / 1000);
-    expect(formatCommitDate(todayTimestamp, mockNow)).toBe('08时30分');
+    // Case 1: 30 seconds ago
+    expect(formatCommitDate(Math.floor(mockNow.getTime() / 1000) - 30, mockNow)).toBe('刚刚');
 
-    // Case 2: Within this month, but not today (2026-07-03 08:30:00 local)
-    const thisMonthDate = new Date(2026, 6, 3, 8, 30, 0);
-    const thisMonthTimestamp = Math.floor(thisMonthDate.getTime() / 1000);
-    expect(formatCommitDate(thisMonthTimestamp, mockNow)).toBe('03日08时');
+    // Case 2: 2 minutes ago
+    expect(formatCommitDate(Math.floor(mockNow.getTime() / 1000) - 120, mockNow)).toBe('2 分钟前');
 
-    // Case 3: Within this year, but not this month (2026-05-15 14:45:00 local)
-    const thisYearDate = new Date(2026, 4, 15, 14, 45, 0); // May
-    const thisYearTimestamp = Math.floor(thisYearDate.getTime() / 1000);
-    expect(formatCommitDate(thisYearTimestamp, mockNow)).toBe('05月15日');
+    // Case 3: 2 hours ago
+    expect(formatCommitDate(Math.floor(mockNow.getTime() / 1000) - 7200, mockNow)).toBe('2 小时前');
 
-    // Case 4: Outside/before this year (2025-11-20 09:15:00 local)
-    const beforeYearDate = new Date(2025, 10, 20, 9, 15, 0); // Nov
-    const beforeYearTimestamp = Math.floor(beforeYearDate.getTime() / 1000);
-    expect(formatCommitDate(beforeYearTimestamp, mockNow)).toBe('25年11月');
+    // Case 4: 2 days ago
+    expect(formatCommitDate(Math.floor(mockNow.getTime() / 1000) - 172800, mockNow)).toBe('2 天前');
+
+    // Case 5: 2 months ago (using 2592000 * 2 = 5184000 seconds)
+    expect(formatCommitDate(Math.floor(mockNow.getTime() / 1000) - 5184000, mockNow)).toBe('2 个月前');
+
+    // Case 6: 2 years ago (using 31536000 * 2 = 63072000 seconds)
+    expect(formatCommitDate(Math.floor(mockNow.getTime() / 1000) - 63072000, mockNow)).toBe('2 年前');
   });
 
   it('escapeHtml should escape special characters', () => {

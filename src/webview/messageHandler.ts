@@ -88,7 +88,7 @@ export function initMessageHandler() {
         state.isFetching = false;
         import('./fileHistory').then(({ renderFileHistory }) => {
           renderFileHistory(message.filePath, message.commits);
-        });
+        }).catch(err => console.error('Failed to load fileHistory module:', err));
         break;
       case 'showFileBlameStats':
         renderFileBlameStats(message.fileName, message.stats);
@@ -117,7 +117,7 @@ export function initMessageHandler() {
           elements.untilDate.value = '';
           elements.dateRangeGroup.classList.add('hidden');
           elements.searchInput.value = '';
-          import('./filters').then(({ updateSelectWidths }) => updateSelectWidths());
+          import('./filters').then(({ updateSelectWidths }) => updateSelectWidths()).catch(err => console.error('Failed to load filters module:', err));
         }
   
         state.commits = message.commits;
@@ -145,7 +145,7 @@ export function initMessageHandler() {
                     (row as HTMLElement).click();
                   }
                 }
-            });
+            }).catch(err => console.error('Failed to load constants module:', err));
           }
         }, 100);
         break;
@@ -155,8 +155,14 @@ export function initMessageHandler() {
         renderStatsStrip(message.stats);
         if (window._pendingForceExpand) {
           // 筛选/重新加载触发：无论当前右侧显示什么，统一切换到统计概览
-          setRightPane(RightPaneState.OVERVIEW);
-          renderOverviewStats(message.stats);
+          if (
+            state.rightPaneState !== RightPaneState.HISTORY &&
+            state.rightPaneState !== RightPaneState.FILE_HISTORY &&
+            state.rightPaneState !== RightPaneState.FILE_BLAME_STATS
+          ) {
+            setRightPane(RightPaneState.OVERVIEW);
+            renderOverviewStats(message.stats);
+          }
           window._pendingForceExpand = false;
         } else if (state.rightPaneState === RightPaneState.OVERVIEW || state.rightPaneState === RightPaneState.LOADING) {
           // 非筛选触发的统计刷新（如后台刷新）：只在右侧可见时更新内容
