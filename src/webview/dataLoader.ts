@@ -24,9 +24,7 @@ export function reloadData(forceExpandOverview = false) {
   state.selectedCommitHash = null;
   state.currentFocusedAuthor = null;
   window._pendingForceExpand = forceExpandOverview;
-  // 只有在右侧面板处于初始 LOADING 状态时才重置，
-  // 筛选条件变更时保持当前右侧面板内容不变（避免闪烁消失）
-  if (state.rightPaneState === RightPaneState.LOADING) {
+  if (forceExpandOverview || state.rightPaneState === RightPaneState.LOADING) {
     setRightPane(RightPaneState.LOADING);
   }
   state.isFetching = true;

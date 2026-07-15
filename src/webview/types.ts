@@ -77,6 +77,7 @@ export interface WebviewState {
   detailsCollapsed?: boolean;
   repos?: RepoInfo[];
   selectedRepoIndex?: number;
+  commitDetailViewMode?: 'tree' | 'list';
 }
 
 export const RightPaneState = { 

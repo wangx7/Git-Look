@@ -888,10 +888,10 @@ tr.commit-row.selected .relative-time {
 
 /* Content area */
 .details-content {
-  padding: 14px 16px 12px;
+  padding: 10px 14px 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   height: 100%;
   overflow-y: auto;
   animation: slideInFromRight 0.18s cubic-bezier(0.4, 0, 0.2, 1);
@@ -901,9 +901,9 @@ tr.commit-row.selected .relative-time {
 .details-header-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   border-bottom: none;
-  padding-bottom: 12px;
+  padding-bottom: 4px;
   flex-shrink: 0;
 }
 
@@ -1028,7 +1028,7 @@ tr.commit-row.selected .relative-time {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 5px 10px;
+  padding: 4px 8px;
   background-color: rgba(128, 128, 128, 0.06);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -1063,14 +1063,14 @@ tr.commit-row.selected .relative-time {
   font-weight: 700;
 }
 
-.open-all-changes-btn.compact-btn {
+.open-all-changes-btn.compact-btn,
+.toggle-view-mode-btn.compact-btn {
   font-size: 11px;
-  padding: 2px 8px;
   border-radius: var(--radius-sm);
   height: 22px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
   border: 1px solid var(--border-subtle);
   background-color: rgba(128, 128, 128, 0.08);
   color: var(--fg-color);
@@ -1079,7 +1079,18 @@ tr.commit-row.selected .relative-time {
   transition: all var(--transition-fast);
 }
 
-.open-all-changes-btn.compact-btn:hover {
+.open-all-changes-btn.compact-btn {
+  padding: 2px 8px;
+  gap: 4px;
+}
+
+.toggle-view-mode-btn.compact-btn {
+  padding: 2px;
+  width: 22px;
+}
+
+.open-all-changes-btn.compact-btn:hover,
+.toggle-view-mode-btn.compact-btn:hover {
   background-color: var(--row-hover-bg);
   border-color: var(--border-color);
   color: var(--fg-color);
@@ -1254,17 +1265,32 @@ tr.commit-row.selected .relative-time {
   white-space: nowrap;
 }
 
+.file-dir {
+  margin-left: 6px;
+  opacity: 0.45;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
 /* File status badges */
 .file-status-badge {
   font-size: 9px;
   font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 20px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
   margin-left: auto;
-  text-align: center;
-  min-width: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   line-height: 1;
-  letter-spacing: 0.04em;
+  text-align: center;
 }
 
 .status-A {
@@ -1560,7 +1586,7 @@ svg#graph-svg .merge-inner.hovered {
   min-width: 280px;
   max-width: 60%;
   height: calc(100% - 12px) !important;
-  background-color: var(--surface-0);
+  background-color: var(--surface-1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1571,7 +1597,6 @@ svg#graph-svg .merge-inner.hovered {
   /* Card Layout */
   margin: 4px 8px 8px 4px;
   border-radius: var(--radius-lg, 10px);
-  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.15));
 }
 
 /* placeholder (loading / empty) */
@@ -2350,7 +2375,6 @@ svg#graph-svg .merge-inner.hovered {
   max-width: 100% !important;
   min-width: unset !important;
   transform: none !important;
-  box-shadow: 0 -2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.12)) !important;
   margin: 4px 8px 8px 8px !important;
   border-radius: var(--radius-lg, 10px) !important;
   height: calc(45% - 12px);

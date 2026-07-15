@@ -155,14 +155,8 @@ export function initMessageHandler() {
         renderStatsStrip(message.stats);
         if (window._pendingForceExpand) {
           // 筛选/重新加载触发：无论当前右侧显示什么，统一切换到统计概览
-          if (
-            state.rightPaneState !== RightPaneState.HISTORY &&
-            state.rightPaneState !== RightPaneState.FILE_HISTORY &&
-            state.rightPaneState !== RightPaneState.FILE_BLAME_STATS
-          ) {
-            setRightPane(RightPaneState.OVERVIEW);
-            renderOverviewStats(message.stats);
-          }
+          setRightPane(RightPaneState.OVERVIEW);
+          renderOverviewStats(message.stats);
           window._pendingForceExpand = false;
         } else if (state.rightPaneState === RightPaneState.OVERVIEW || state.rightPaneState === RightPaneState.LOADING) {
           // 非筛选触发的统计刷新（如后台刷新）：只在右侧可见时更新内容

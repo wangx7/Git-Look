@@ -106,7 +106,7 @@ function init() {
     }
     elements.authorSelect.value = state.currentFocusedAuthor;
     adjustSelectWidth(elements.authorSelect);
-    reloadData();
+    reloadData(true);
   });
 
   // Restore state if available
@@ -123,6 +123,9 @@ function init() {
     // Restore repo selection
     state.repos = previousState.repos || [];
     state.selectedRepoIndex = previousState.selectedRepoIndex ?? 0;
+    if (previousState.commitDetailViewMode) {
+      state.commitDetailViewMode = previousState.commitDetailViewMode;
+    }
     updateRepoSelector();
     updateRepoSelectorVisibility();
 

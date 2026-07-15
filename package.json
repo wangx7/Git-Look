@@ -1,8 +1,8 @@
 {
   "name": "git-visual",
   "displayName": "Git Look",
-  "description": "Git 可视化工具。提供分支潮汐树、行作者、选区历史、文件历史、提交数据分析功能。",
-  "version": "1.1.10",
+  "description": "Git 可视化工具。提供分支潮汐、行作者、选区历史、文件历史、提交数据分析功能。",
+  "version": "1.2.1",
   "publisher": "wangx123",
   "author": "wangx7",
   "license": "MIT",
@@ -59,21 +59,21 @@
       },
       {
         "command": "git-visual.openFileRecentDiff",
-        "title": "Git 潮汐树: 打开最近文件 Diff"
+        "title": "Git 潮汐: 打开最近文件 Diff"
       },
       {
         "command": "git-visual.showLineBlame",
-        "title": "Git 潮汐树: 显示行作者"
+        "title": "Git 潮汐: 显示行作者"
       },
       {
         "command": "git-visual.openWorkspaceFile",
-        "title": "Git 潮汐树: 打开工作区文件"
+        "title": "Git 潮汐: 打开工作区文件"
       }
     ],
     "submenus": [
       {
         "id": "git-visual.submenu",
-        "label": "Git 潮汐树"
+        "label": "Git 潮汐"
       }
     ],
     "menus": {
@@ -106,7 +106,7 @@
       "panel": [
         {
           "id": "git-visual-panel",
-          "title": "潮汐树",
+          "title": "潮汐",
           "icon": "$(git-merge)"
         }
       ]
@@ -116,7 +116,7 @@
         {
           "type": "webview",
           "id": "git-visual.graphView",
-          "name": "Git 潮汐树"
+          "name": "Git 潮汐"
         }
       ]
     }

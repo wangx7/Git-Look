@@ -13,6 +13,8 @@ import { getFilters } from './filters';
 import { renderDetailBadges } from './badgeRenderer';
 
 let requestVirtualListUpdate: (() => void) | null = null;
+let currentCommitHash: string = '';
+let currentCommitFiles: any[] = [];
 
 export function onRequestVirtualListUpdate(callback: () => void) {
   requestVirtualListUpdate = callback;
@@ -146,6 +148,9 @@ export function collapseDetail() {
 export function renderCommitDetail(hash, files) {
   if (state.selectedCommitHash !== hash) return;
 
+  currentCommitHash = hash;
+  currentCommitFiles = files;
+
   if (window.pendingFileLoadTimeout) {
     clearTimeout(window.pendingFileLoadTimeout);
     window.pendingFileLoadTimeout = null;
@@ -173,6 +178,10 @@ export function renderCommitDetail(hash, files) {
     if (f.deletions) deletedLines += parseInt(f.deletions, 10) || 0;
   });
 
+  const viewMode = state.commitDetailViewMode || 'tree';
+  const toggleTitle = viewMode === 'tree' ? '切换为列表视图' : '切换为树状视图';
+  const toggleIcon = viewMode === 'tree' ? 'codicon-list-flat' : 'codicon-list-tree';
+
   let statsHtml = '<div class="details-stats-toolbar">';
   statsHtml += '<div class="stats-left">';
   statsHtml += `<i class="codicon codicon-files" title="文件更改数"></i>`;
@@ -184,10 +193,14 @@ export function renderCommitDetail(hash, files) {
   }
   statsHtml += '</div>';
   statsHtml += `
-      <button class="open-all-changes-btn compact-btn" title="打开当前提交的所有文件更改对比 (Multi Diff)">
-        <i class="codicon codicon-diff"></i>
-        <span>对比全部</span>
-      </button>
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <button class="toggle-view-mode-btn compact-btn" title="${toggleTitle}">
+          <i class="codicon ${toggleIcon}"></i>
+        </button>
+        <button class="open-all-changes-btn compact-btn" title="打开当前提交的所有文件更改对比 (Multi Diff)">
+          <i class="codicon codicon-diff"></i>
+        </button>
+      </div>
     `;
   statsHtml += '</div>';
 
@@ -207,10 +220,24 @@ export function renderCommitDetail(hash, files) {
     });
   }
 
-  const fileTree = buildFileTree(files);
-  const treeHTML = renderFileTreeHTML(fileTree, 0, hash, parentHash);
+  const toggleViewModeBtn = elements.detailStatsRow.querySelector('.toggle-view-mode-btn');
+  if (toggleViewModeBtn) {
+    toggleViewModeBtn.addEventListener('click', () => {
+      state.commitDetailViewMode = state.commitDetailViewMode === 'tree' ? 'list' : 'tree';
+      saveCurrentState();
+      renderCommitDetail(currentCommitHash, currentCommitFiles);
+    });
+  }
 
-  elements.detailFilesTree.innerHTML = treeHTML;
+  let filesHTML = '';
+  if (viewMode === 'list') {
+    filesHTML = renderFileListHTML(files, hash, parentHash);
+  } else {
+    const fileTree = buildFileTree(files);
+    filesHTML = renderFileTreeHTML(fileTree, 0, hash, parentHash);
+  }
+
+  elements.detailFilesTree.innerHTML = filesHTML;
 
   // 点击文件打开 diff
   elements.detailFilesTree.querySelectorAll('.file-node').forEach(el => {
@@ -392,5 +419,34 @@ export function focusAndHighlightCommit(hash) {
     // Use getFilters() so date presets (24h, 7d) are converted to real dates
     window.vscode.postMessage({ command: 'locateCommit', hash, filters: getFilters() });
   }
+}
+
+export function renderFileListHTML(files, hash, parentHash) {
+  let html = '';
+  const sortedFiles = [...files].sort((a, b) => a.path.localeCompare(b.path));
+
+  sortedFiles.forEach(f => {
+    const iconInfo = getFileIconInfo(f.path);
+    const statusLabel = f.status;
+    const statusClass = `status-${f.status}`;
+
+    const pathParts = f.path.split('/');
+    const fileName = pathParts[pathParts.length - 1];
+    const dirPath = pathParts.slice(0, -1).join('/');
+
+    html += `
+        <div class="tree-node file-node" style="padding-left: 0px;" data-path="${escapeHtml(f.path)}" data-hash="${hash}" data-parent-hash="${parentHash}">
+          <i class="codicon ${iconInfo.icon} file-icon ${iconInfo.color}"></i>
+          <span class="file-name" style="flex-grow: 0; flex-shrink: 0; max-width: 80%;">${escapeHtml(fileName)}</span>
+          ${dirPath ? `<span class="file-dir" title="${escapeHtml(dirPath)}">${escapeHtml(dirPath)}</span>` : '<span class="file-dir"></span>'}
+          <span class="file-actions">
+            <i class="codicon codicon-go-to-file action-btn" title="转到当前文件 (Go to Current File)"></i>
+          </span>
+          <span class="file-status-badge ${statusClass}">${statusLabel}</span>
+        </div>
+      `;
+  });
+
+  return html;
 }
 

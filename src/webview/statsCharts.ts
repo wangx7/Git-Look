@@ -341,7 +341,7 @@ export function renderActivityChart(activity: any[], mode: 'daily' | 'hourly' = 
     }, 180);
 
     tooltip.style.display = 'none';
-    reloadData();
+    reloadData(true);
   });
 }
 

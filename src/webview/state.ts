@@ -25,6 +25,7 @@ export class StateManager {
   readonly pageSize: number = 150;
   repos: RepoInfo[] = [];
   selectedRepoIndex: number = 0;
+  commitDetailViewMode: 'tree' | 'list' = 'tree';
 
   getRightPaneStateNumber(): number {
     if (this.rightPaneVisible === 0) {
@@ -57,7 +58,8 @@ export class StateManager {
       rightPaneVisible: this.rightPaneVisible,
       detailsCollapsed: this.rightPaneVisible === 0,
       repos: this.repos,
-      selectedRepoIndex: this.selectedRepoIndex
+      selectedRepoIndex: this.selectedRepoIndex,
+      commitDetailViewMode: this.commitDetailViewMode
     };
     window.vscode.setState(state);
   }
