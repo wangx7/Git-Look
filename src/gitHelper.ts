@@ -992,20 +992,24 @@ export async function getCodeStats(
 
 export async function hasFileLocalModifications(
   cwd: string,
-  filePath: string
+  filePath: string,
+  signal?: AbortSignal
 ): Promise<boolean> {
   try {
     let gitRoot = cwd;
     try {
-      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+      gitRoot = (await execGit(['rev-parse', '--show-toplevel'], cwd, signal)).trim();
     } catch (e) {
       // Ignore
     }
     const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
-    const diffOutput = await execGit(['diff', '--name-only', 'HEAD', '--', repoFilePath], gitRoot);
+    const diffOutput = await execGit(['diff', '--name-only', 'HEAD', '--', repoFilePath], gitRoot, signal);
     return diffOutput.trim().length > 0;
-  } catch (e) {
-    console.error('Error checking file local modifications:', e);
+  } catch (e: any) {
+    // 用户快速切换编辑器触发的取消属于正常流程，不打印噪音日志
+    if (e?.message !== 'ABORTED' && !signal?.aborted) {
+      console.error('Error checking file local modifications:', e);
+    }
     return false;
   }
 }
@@ -1115,8 +1119,10 @@ export async function getCurrentGitUser(gitRoot: string, signal?: AbortSignal): 
       name: name || undefined,
       email: email || undefined
     };
-  } catch (e) {
-    console.error('Error getting current git user:', e);
+  } catch (e: any) {
+    if (e?.message !== 'ABORTED' && !signal?.aborted) {
+      console.error('Error getting current git user:', e);
+    }
     return {};
   }
 }
@@ -1156,8 +1162,10 @@ export async function getFileLastCommit(
       timestamp: parseInt(timestampStr, 10) || 0,
       message: messageParts.join('\x1f')
     };
-  } catch (e) {
-    console.error('Error getting file last commit:', e);
+  } catch (e: any) {
+    if (e?.message !== 'ABORTED' && !signal?.aborted) {
+      console.error('Error getting file last commit:', e);
+    }
     return undefined;
   }
 }
@@ -1199,8 +1207,10 @@ export async function getFileAuthors(
     }
 
     return Array.from(authorsByEmail.values());
-  } catch (e) {
-    console.error('Error getting file authors:', e);
+  } catch (e: any) {
+    if (e?.message !== 'ABORTED' && !signal?.aborted) {
+      console.error('Error getting file authors:', e);
+    }
     return [];
   }
 }
@@ -1213,8 +1223,10 @@ export async function isFileTracked(
   try {
     const output = await execGit(['ls-files', '--', repoFilePath], gitRoot, signal);
     return output.trim().length > 0;
-  } catch (e) {
-    console.error('Error checking if file is tracked:', e);
+  } catch (e: any) {
+    if (e?.message !== 'ABORTED' && !signal?.aborted) {
+      console.error('Error checking if file is tracked:', e);
+    }
     return false;
   }
 }

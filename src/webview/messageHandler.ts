@@ -48,8 +48,22 @@ export function initMessageHandler() {
       case 'error':
         hideLoading();
         state.isFetching = false;
+        // fetch 失败也要解除按钮的旋转态
+        if (elements.fetchBtn) elements.fetchBtn.classList.remove('fetching');
         showError(message.error);
         break;
+      case 'fetchRemoteDone': {
+        // host 端完成 git fetch 后回送，解除按钮旋转态；
+        // message.refresh=true 时表示远端确实有变化，host 已通过 watcher 触发刷新
+        if (elements.fetchBtn) elements.fetchBtn.classList.remove('fetching');
+        if (message.error) {
+          showError(message.error);
+        } else if (message.refresh === false) {
+          // 没触发 watcher（无新对象），主动触发一次刷新
+          (window as any).vscode.postMessage({ command: 'loadData', page: 0 });
+        }
+        break;
+      }
       case 'dataLoaded': {
         hideLoading();
         state.isFetching = false;
@@ -131,10 +145,13 @@ export function initMessageHandler() {
         updateFilterControls();
         renderTableAndGraph();
         saveCurrentState();
-  
-        setTimeout(() => {
-          const index = state.commits.findIndex(c => c.hash === message.hash);
-          if (index !== -1) {
+
+        // 双 rAF 等待 layout 完成后再计算 scrollTop 并触发点击；
+        // 比 setTimeout(100) 更稳定（不依赖固定延迟，慢机器也准确），快机器上无谓延迟更短
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const index = state.commits.findIndex(c => c.hash === message.hash);
+            if (index === -1) return;
             import('./constants').then(({ constants }) => {
                 const rowHeight = constants.rowHeight;
                 elements.tableContainer.scrollTop = Math.max(0, index * rowHeight - elements.tableContainer.clientHeight / 2 + rowHeight / 2);
@@ -146,8 +163,8 @@ export function initMessageHandler() {
                   }
                 }
             }).catch(err => console.error('Failed to load constants module:', err));
-          }
-        }, 100);
+          });
+        });
         break;
       }
       case 'statsLoaded':

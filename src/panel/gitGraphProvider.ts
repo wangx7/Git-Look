@@ -67,6 +67,10 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         clearTimeout(this._fileHistoryAutoTimer);
         this._fileHistoryAutoTimer = undefined;
       }
+      // 取消所有 in-flight git 命令，避免 panel 关闭后子进程继续跑完
+      this._abortController?.abort();
+      this._statsAbortController?.abort();
+      this._autoLoadAbortController?.abort();
       this._fileHistoryActive = false;
       this._repoDisposables.forEach(d => { try { d.dispose(); } catch { /* ignore */ } });
       this._repoDisposables = [];
@@ -183,6 +187,38 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             webviewView.webview.postMessage({
               type: 'error',
               error: err.message || '获取 Git 数据失败'
+          });
+          }
+          break;
+        }
+        case 'fetchRemote': {
+          // 从远程拉取所有分支：git fetch --all --prune
+          // 不动本地分支，只更新 refs/remotes/*；
+          // 关键：fetch 前后必须用包含 objectname 的格式比对，且 fetch 后立即 clearGitCache，
+          // 否则 execGit 的内存缓存会让 afterRefs 直接返回旧值，导致 changed 永远为 false
+          try {
+            // refname + objectname：分支名不变但 commit SHA 变了也能感知
+            const refFmt = ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/remotes/'];
+            const beforeRefs = (await execGit(refFmt, gitRoot)).trim();
+            await execGit(['fetch', '--all', '--prune'], gitRoot);
+            // fetch 后必须立即清缓存，避免 afterRefs 命中 fetch 前的缓存
+            clearGitCache();
+            const afterRefs = (await execGit(refFmt, gitRoot)).trim();
+            const changed = beforeRefs !== afterRefs;
+            webviewView.webview.postMessage({
+              type: 'fetchRemoteDone',
+              refresh: changed
+            });
+            if (changed) {
+              // watcher 也会触发，但有 300ms debounce；这里主动 refresh 让 UI 更新更及时
+              this.refresh();
+            }
+          } catch (err: any) {
+            // 失败也要清缓存，避免后续读到脏数据
+            clearGitCache();
+            webviewView.webview.postMessage({
+              type: 'fetchRemoteDone',
+              error: err.message || 'git fetch 失败'
             });
           }
           break;

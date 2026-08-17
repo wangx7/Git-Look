@@ -76,7 +76,8 @@ jest.mock('./dom', () => {
       untilDate: mockInput(),
       searchInput: mockInput(),
       dateRangeGroup: mockEl(),
-      resetBtn: mockEl()
+      resetBtn: mockEl(),
+      fetchBtn: mockEl()
     }
   };
 });
@@ -174,5 +175,6 @@ describe('filters', () => {
     expect(elements.authorSelect.addEventListener).toHaveBeenCalledWith('change', expect.any(Function));
     expect(elements.datePresetSelect.addEventListener).toHaveBeenCalledWith('change', expect.any(Function));
     expect(elements.resetBtn.addEventListener).toHaveBeenCalledWith('click', expect.any(Function));
+    expect(elements.fetchBtn.addEventListener).toHaveBeenCalledWith('click', expect.any(Function));
   });
 });

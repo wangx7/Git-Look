@@ -108,7 +108,14 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
     this._onDidChangeCodeLenses.fire();
   }
 
-  public async provideCodeLenses(document: vscode.TextDocument): Promise<vscode.CodeLens[]> {
+  public async provideCodeLenses(
+    document: vscode.TextDocument,
+    token: vscode.CancellationToken
+  ): Promise<vscode.CodeLens[]> {
+    // 入口短路：编辑器在排队调度时可能已被关闭/切换，token 已取消
+    if (token?.isCancellationRequested) {
+      return [];
+    }
     if (document.isUntitled || document.uri.scheme !== 'file') {
       return [];
     }
@@ -121,14 +128,24 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
 
     const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
 
+    // 把 VSCode 的 CancellationToken 桥接到 AbortController，
+    // 让所有 git 子进程在用户切换编辑器时被及时取消
+    const abortController = new AbortController();
+    const disposable = token.onCancellationRequested(() => abortController.abort());
+    const signal = abortController.signal;
+
     try {
       const [hasLocalChanges, isTracked, lastCommit, authors, currentUser] = await Promise.all([
-        hasFileLocalModifications(gitRoot, filePath),
-        isFileTracked(gitRoot, repoFilePath),
-        getFileLastCommit(gitRoot, repoFilePath),
-        getFileAuthors(gitRoot, repoFilePath),
-        getCurrentGitUser(gitRoot)
+        hasFileLocalModifications(gitRoot, filePath, signal),
+        isFileTracked(gitRoot, repoFilePath, signal),
+        getFileLastCommit(gitRoot, repoFilePath, signal),
+        getFileAuthors(gitRoot, repoFilePath, signal),
+        getCurrentGitUser(gitRoot, signal)
       ]);
+
+      if (token.isCancellationRequested) {
+        return [];
+      }
 
       const isNewFile = !isTracked && fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
       const nowSeconds = Math.floor(Date.now() / 1000);
@@ -167,8 +184,13 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
 
       return lenses;
     } catch (err) {
-      console.error('[Git Look] File header CodeLens error:', err);
+      // 取消时不打印噪音日志
+      if (!token.isCancellationRequested) {
+        console.error('[Git Look] File header CodeLens error:', err);
+      }
       return [];
+    } finally {
+      disposable.dispose();
     }
   }
 }

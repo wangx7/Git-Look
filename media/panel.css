@@ -293,7 +293,8 @@ body {
 }
 
 /* Reset button */
-#reset-btn {
+#reset-btn,
+#fetch-btn {
   height: 26px;
   width: 26px;
   padding: 0;
@@ -311,9 +312,26 @@ body {
   transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
-#reset-btn:hover {
+#reset-btn:hover,
+#fetch-btn:hover,
+#fetch-btn.fetching {
   background-color: var(--row-hover-bg);
   color: var(--fg-color);
+}
+
+/* fetch 进行中：图标旋转 + 禁用点击 */
+#fetch-btn.fetching {
+  cursor: progress;
+  pointer-events: none;
+}
+
+#fetch-btn.fetching .codicon {
+  animation: fetch-spin 0.9s linear infinite;
+}
+
+@keyframes fetch-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 #toggle-details-btn {
@@ -2301,7 +2319,8 @@ svg#graph-svg .merge-inner.hovered {
   padding: 0 6px 4px 6px;
 }
 
-.left-pane.pane-compact #reset-btn {
+.left-pane.pane-compact #reset-btn,
+.left-pane.pane-compact #fetch-btn {
   padding: 0 5px;
   min-width: 22px;
   height: 26px;
@@ -2393,7 +2412,8 @@ svg#graph-svg .merge-inner.hovered {
   display: none;
 }
 
-.main-layout.layout-narrow .filter-bar #reset-btn {
+.main-layout.layout-narrow .filter-bar #reset-btn,
+.main-layout.layout-narrow .filter-bar #fetch-btn {
   padding: 0 7px;
   min-width: 26px;
 }

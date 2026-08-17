@@ -206,7 +206,9 @@ export function renderTableAndGraph() {
               const activeHash = lanes[i];
               if (activeHash) {
                 const activeCommit = hashToCommitMap.get(activeHash);
-                if (activeCommit && activeCommit.parents && activeCommit.parents[0] === pk) {
+                // 检查该 lane 上的 commit 是否把 pk 作为任意一个 parent
+                // （旧实现只检查 parents[0]，导致通过 parents[1..] 合入的分支无法复用 lane，多占 1 lane）
+                if (activeCommit && activeCommit.parents && activeCommit.parents.includes(pk)) {
                   otherBranchChildLaneIdx = i;
                   break;
                 }

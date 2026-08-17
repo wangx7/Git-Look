@@ -17,13 +17,6 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(docProvider);
 
-  // Clear git cache when text documents are saved
-  context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument(() => {
-      clearGitCache();
-    })
-  );
-
   // Centralized repository manager for multi-repo support
   const repoManager = new RepoManager();
   await repoManager.init();
@@ -246,9 +239,10 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerCodeLensProvider({ scheme: 'file' }, fileHeaderProvider)
   );
 
-  // Refresh file header CodeLens on save and document changes
+  // Refresh file header CodeLens and clear git cache on save（合并为单一订阅）
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(() => {
+      clearGitCache();
       fileHeaderProvider.refresh();
     })
   );

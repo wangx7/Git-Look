@@ -26,6 +26,12 @@ function getAllPaneElements(): (HTMLElement | null)[] {
 export function setRightPane(paneState: any) {
   state.rightPaneState = paneState;
 
+  // 用户主动切换到非 OVERVIEW/LOADING 视图后，应取消后续 statsLoaded 的"强制切回 OVERVIEW"
+  // 否则在 panel 首次打开、消息入队与 statsLoaded 返回的竞态下，会覆盖用户刚选中的视图
+  if (paneState !== RightPaneState.OVERVIEW && paneState !== RightPaneState.LOADING) {
+    window._pendingForceExpand = false;
+  }
+
   // Hide all pane elements and remove animation class
   getAllPaneElements().forEach(el => {
     if (el) {

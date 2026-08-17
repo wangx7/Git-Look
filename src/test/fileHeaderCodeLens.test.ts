@@ -44,6 +44,14 @@ function createMockRepoManager() {
   } as any;
 }
 
+/** Mock CancellationToken：不被取消，且 onCancellationRequested 返回可释放的 disposable */
+function createMockToken() {
+  return {
+    isCancellationRequested: false,
+    onCancellationRequested: () => ({ dispose: () => {} })
+  } as any;
+}
+
 describe('fileHeaderCodeLens', () => {
   describe('formatDateTimeChinese', () => {
     it('should format date as YYYY/MM/DD HH:MM', () => {
@@ -129,7 +137,7 @@ describe('fileHeaderCodeLens', () => {
     it('should return empty array for untitled documents', async () => {
       const provider = new FileHeaderCodeLensProvider(createMockRepoManager());
       const document = { isUntitled: true, uri: { scheme: 'file' } } as any;
-      const lenses = await provider.provideCodeLenses(document);
+      const lenses = await provider.provideCodeLenses(document, createMockToken());
       expect(lenses).toEqual([]);
     });
 
@@ -157,7 +165,7 @@ describe('fileHeaderCodeLens', () => {
         uri: { scheme: 'file', fsPath: path.join('/mock/git/root', 'src', 'file.ts') }
       } as any;
 
-      const lenses = await provider.provideCodeLenses(document);
+      const lenses = await provider.provideCodeLenses(document, createMockToken());
       expect(lenses.length).toBe(2);
       expect(lenses[0].command.command).toBe('git-visual.openFileRecentDiff');
       expect(lenses[0].command.arguments).toEqual([document.uri.fsPath, 'commit', 'abc1234', false]);
@@ -183,7 +191,7 @@ describe('fileHeaderCodeLens', () => {
         uri: { scheme: 'file', fsPath: path.join('/mock/git/root', 'new-file.ts') }
       } as any;
 
-      const lenses = await provider.provideCodeLenses(document);
+      const lenses = await provider.provideCodeLenses(document, createMockToken());
       expect(lenses.length).toBe(2);
       expect(lenses[0].command.command).toBe('git-visual.openFileRecentDiff');
       expect(lenses[0].command.arguments).toEqual([document.uri.fsPath, 'workingTree', undefined, true]);

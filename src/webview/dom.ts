@@ -10,6 +10,7 @@ export const elements = {
   untilDate: document.getElementById('until-date') as HTMLInputElement,
   searchInput: document.getElementById('search-input') as HTMLInputElement,
   resetBtn: document.getElementById('reset-btn') as HTMLButtonElement,
+  fetchBtn: document.getElementById('fetch-btn') as HTMLButtonElement,
   toggleDetailsBtn: document.getElementById('toggle-details-btn') as HTMLButtonElement,
   loadingOverlay: document.getElementById('loading') as HTMLElement,
   errorBanner: document.getElementById('error-message') as HTMLElement,

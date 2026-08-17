@@ -5,6 +5,10 @@ import { setRightPane, ensureDetailsExpanded } from './rightPane';
 
 let lockedSliceHash: any = null;
 let lockedSliceColor: any = null;
+// svg 上的空白处 click 监听器只需挂载一次，避免每次 renderRoseChart 重复累积
+let svgClickListenerAttached = false;
+// 持有最新的 updateSliceStyles 引用，让一次性 listener 调到最新版本
+let currentUpdateSliceStyles: (() => void) | null = null;
 
 export function renderFileBlameStats(fileName, stats) {
   state.rightPaneState = RightPaneState.FILE_BLAME_STATS;
@@ -299,16 +303,20 @@ export function renderRoseChart(stats, totalLines) {
 
   // Handle initial styles (e.g. if lockedSliceHash is already set)
   updateSliceStyles();
+  currentUpdateSliceStyles = updateSliceStyles;
 
-  // Click SVG empty space to unlock
-  svg.addEventListener('click', (e: any) => {
-    if (!e.target || !e.target.tagName) return;
-    if (e.target.tagName !== 'path') {
-      lockedSliceHash = null;
-      lockedSliceColor = null;
-      updateSliceStyles();
-      window.vscode.postMessage({ command: 'clearHoverBlameCommit' });
-    }
-  });
+  // Click SVG empty space to unlock（仅挂载一次，renderRoseChart 重复调用不会累积监听器）
+  if (!svgClickListenerAttached) {
+    svgClickListenerAttached = true;
+    svg.addEventListener('click', (e: any) => {
+      if (!e.target || !e.target.tagName) return;
+      if (e.target.tagName !== 'path') {
+        lockedSliceHash = null;
+        lockedSliceColor = null;
+        if (currentUpdateSliceStyles) currentUpdateSliceStyles();
+        window.vscode.postMessage({ command: 'clearHoverBlameCommit' });
+      }
+    });
+  }
 }
 
