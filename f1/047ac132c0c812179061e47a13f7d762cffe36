@@ -1,0 +1,83 @@
+src/webview/graphLayout.ts
+  s_7121247fc8cc05::t_c5af8adcf85a98 209-211
+src/test/fileHeaderCodeLens.test.ts
+  s_7121247fc8cc05::t_66550d063392ff 47-54
+  s_7121247fc8cc05::t_460c2082abc7a4 140,168,194
+src/webview/messageHandler.ts
+  s_7121247fc8cc05::t_e573d6cb459238 51-52,55-66
+  s_7121247fc8cc05::t_f2fecdc8e46b8c 148-154,166-167
+src/extension.ts
+  s_7121247fc8cc05::t_699a1640787d26 242,245
+src/webview/dom.ts
+  s_7121247fc8cc05::t_0daf1e86e667ee 13
+src/fileHeaderCodeLens.ts
+  s_7121247fc8cc05::t_d08eebba0db05e 115-118
+  s_7121247fc8cc05::t_b4ce528b342cfa 187-190,192-193
+  s_7121247fc8cc05::t_a65c558993ca53 111-114,131-136,139-143,146-148
+  s_7121247fc8cc05::t_d3aea455fe3b78 149
+media/panel.css
+  s_7121247fc8cc05::t_d0c8a4d0aad1f4 2322-2323
+  s_7121247fc8cc05::t_adb82c9d178798 296-297,315-317,322-335
+  s_7121247fc8cc05::t_ad7ca94fdebbc0 2415-2416
+  s_7121247fc8cc05::t_8d670b4db2f524 336
+src/webview/filters.ts
+  s_7121247fc8cc05::t_63d4ed65142a0e 159-168
+src/webview/rightPane.ts
+  s_7121247fc8cc05::t_7de16d8717d03a 29-34
+src/panel/gitGraphProvider.ts
+  s_7121247fc8cc05::t_82d219501d453f 197-198,200-202,204-206,213,217-218
+  s_7121247fc8cc05::t_373b0fe8d05800 190-196,199,203,207-212,214-216,219-221
+  s_7121247fc8cc05::t_704ef6cd868fc0 70-73
+src/webview/filters.test.ts
+  s_7121247fc8cc05::t_cd8cb1e19c16d1 79-80
+  s_7121247fc8cc05::t_ce778ee2983fed 178
+media/panel.html
+  s_7121247fc8cc05::t_c7f18c73152a88 74-77
+src/webview/roseChart.ts
+  s_7121247fc8cc05::t_21ebb8a38d65cb 10-11
+  s_7121247fc8cc05::t_8260a30c3c8c2b 308-315,317-320
+  s_7121247fc8cc05::t_03a55a625e2b3e 306,316
+  s_7121247fc8cc05::t_ebf5011b36c2c9 8-9
+  s_7121247fc8cc05::t_705b86802e7919 307
+src/gitHelper.ts
+  s_7121247fc8cc05::t_6acd0e152ba66b 1226-1229
+  s_7121247fc8cc05::t_78fd680de51879 995-996,1001,1006
+  s_7121247fc8cc05::t_61ed767d9c7a70 1122-1125
+  s_7121247fc8cc05::t_734938e6e74c84 1008-1012
+  s_7121247fc8cc05::t_996a17782c7442 1210-1213
+  s_7121247fc8cc05::t_c4026d301a0153 1165-1168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "f1047ac132c0c812179061e47a13f7d762cffe36",
+  "prompts": {},
+  "humans": {
+    "h_8b5a54b24800b0": {
+      "author": "wangx <36002218@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_7121247fc8cc05": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a829ec673ba21153f9100b6",
+        "model": "glm-5.2"
+      },
+      "human_author": "wangx <36002218@qq.com>",
+      "custom_attributes": {
+        "runtime_client": "trae-tob-git-ai",
+        "source_scene": "agent",
+        "tool_use_id": "6a82ab1f73ba21153f9102fd",
+        "client_type": "ide",
+        "tool_type": "builtin",
+        "edit_kind": "file_edit",
+        "tool_id": "icube:applyChatSnapshotPatch",
+        "session_id": "6a829ec673ba21153f9100b6",
+        "operation_id": "6a82ab1f73ba21153f9102fd",
+        "dedupe_key": "6a829ec673ba21153f9100b6:6a82ab1f73ba21153f9102fd:afterEdit:5edf6da4",
+        "external_session_id": "6a829ec673ba21153f9100b6"
+      }
+    }
+  }
+}
