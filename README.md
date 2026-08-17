@@ -4,7 +4,7 @@
 
 ## 🖼️ 视觉效果预览
 
-<video src="./media/video.mp4" width="100%" controls autoplay loop muted></video>
+<video src="https://raw.githubusercontent.com/wangx7/Git-Look/main/media/video.mp4" width="100%" controls autoplay loop muted></video>
 
 ## 🚀 核心功能
 
