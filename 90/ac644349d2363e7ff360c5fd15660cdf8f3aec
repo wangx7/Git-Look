@@ -1,0 +1,14 @@
+package.json
+  h_8b5a54b24800b0 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "90ac644349d2363e7ff360c5fd15660cdf8f3aec",
+  "prompts": {},
+  "humans": {
+    "h_8b5a54b24800b0": {
+      "author": "wangx <36002218@qq.com>"
+    }
+  }
+}
