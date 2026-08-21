@@ -175,8 +175,21 @@
             <span>加载统计中…</span>
           </div>
           <div class="details-content hidden" id="details-content">
-            <div class="details-header-section">
-              <div class="details-meta-row">
+            <!-- Zone 1: Changed Files -->
+            <div class="details-files-section">
+              <div id="detail-files-tree" class="file-list">
+                <!-- 文件树 -->
+              </div>
+            </div>
+
+            <!-- Zone 2: Stats & Actions Strip -->
+            <div class="details-stats-row" id="detail-stats-row">
+              <!-- Stats & Actions populated dynamically -->
+            </div>
+
+            <!-- Zone 3: Commit Info Card -->
+            <div class="commit-info-card">
+              <div class="commit-info-author-row">
                 <span class="detail-author-info-compact">
                   <span class="avatar-circle" id="detail-author-avatar"></span>
                   <span class="detail-author-text">
@@ -184,26 +197,17 @@
                     <span id="detail-author-date" class="detail-author-date"></span>
                   </span>
                 </span>
-                <div class="details-hash-group">
-                  <span id="detail-hash-badge" class="detail-hash-copyable" title="点击复制哈希"></span>
+                <div class="commit-info-badges">
                   <span id="detail-merge-badge" class="ref-badge badge-merge hidden">合并</span>
+                  <span id="detail-hash-badge" class="detail-hash-copyable" title="点击复制哈希"></span>
                 </div>
               </div>
 
               <div id="detail-branches-container" class="detail-branches-container hidden"></div>
 
-              <div class="details-message-container">
+              <div class="commit-info-message">
                 <div id="detail-msg-subject" class="detail-msg-subject"></div>
                 <div id="detail-msg-body" class="detail-msg-body hidden"></div>
-              </div>
-
-              <div class="details-stats-row" id="detail-stats-row">
-                <!-- Stats will be populated here -->
-              </div>
-            </div>
-            <div class="details-files-section">
-              <div id="detail-files-tree" class="file-list">
-                <!-- 文件树 -->
               </div>
             </div>
           </div>

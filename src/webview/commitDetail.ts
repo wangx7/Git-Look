@@ -184,16 +184,21 @@ export function renderCommitDetail(hash, files) {
 
   let statsHtml = '<div class="details-stats-toolbar">';
   statsHtml += '<div class="stats-left">';
-  statsHtml += `<i class="codicon codicon-files" title="文件更改数"></i>`;
-  statsHtml += `<span class="stats-count-badge" title="已更改文件数">${filesChanged}</span>`;
-  if (addedLines > 0 || deletedLines > 0) {
-    statsHtml += `<span class="stats-divider">|</span>`;
-    if (addedLines > 0) statsHtml += `<span class="stats-diff-badge add" title="插入行数">+${addedLines}</span>`;
-    if (deletedLines > 0) statsHtml += `<span class="stats-diff-badge delete" title="删除行数">-${deletedLines}</span>`;
+  statsHtml += `
+    <span class="stat-pill stat-pill-files" title="已更改 ${filesChanged} 个文件">
+      <i class="codicon codicon-files"></i>
+      <span class="stats-count-badge">${filesChanged}</span>
+    </span>
+  `;
+  if (addedLines > 0) {
+    statsHtml += `<span class="stat-pill stat-pill-add" title="新增 ${addedLines.toLocaleString()} 行">+${addedLines.toLocaleString()}</span>`;
+  }
+  if (deletedLines > 0) {
+    statsHtml += `<span class="stat-pill stat-pill-del" title="删除 ${deletedLines.toLocaleString()} 行">-${deletedLines.toLocaleString()}</span>`;
   }
   statsHtml += '</div>';
   statsHtml += `
-      <div style="display: flex; gap: 6px; align-items: center;">
+      <div class="stats-right-actions">
         <button class="toggle-view-mode-btn compact-btn" title="${toggleTitle}">
           <i class="codicon ${toggleIcon}"></i>
         </button>

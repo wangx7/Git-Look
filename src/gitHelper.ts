@@ -363,7 +363,7 @@ export async function getAuthors(cwd: string, signal?: AbortSignal): Promise<str
   try {
     // No commit count limit: ensures all authors are included for large repositories.
     // Results are deduplicated via Set, so memory usage stays bounded by unique author count.
-    const output = await execGit(['log', '--all', '--pretty=format:%an'], cwd, signal);
+    const output = await execGit(['log', '--branches', '--tags', '--remotes', 'HEAD', '--pretty=format:%an'], cwd, signal);
     const authorsSet = new Set<string>();
     output.split('\n').forEach(name => {
       const trimmed = name.trim();
@@ -394,7 +394,7 @@ function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string
   if (filters.branch) {
     args.push(filters.branch);
   } else {
-    args.push('--all');
+    args.push('--branches', '--tags', '--remotes', 'HEAD');
   }
 
   // Author filter
@@ -847,7 +847,7 @@ export async function getCodeStats(
   if (filters.branch) {
     args.push(filters.branch);
   } else {
-    args.push('--all');
+    args.push('--branches', '--tags', '--remotes', 'HEAD');
   }
   if (filters.author) {
     args.push(`--author=${filters.author}`);
