@@ -929,14 +929,13 @@ tr.commit-row.selected .relative-time {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 8px;
-  background-color: var(--surface-2, rgba(128, 128, 128, 0.05));
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  padding: 2px 0;
+  background-color: transparent;
+  border: none;
   font-size: 11px;
-  min-height: 32px;
+  min-height: 28px;
   box-sizing: border-box;
-  margin: 2px 0;
+  margin: 0;
 }
 
 .stats-left {
@@ -1037,6 +1036,7 @@ tr.commit-row.selected .relative-time {
   flex-direction: column;
   gap: 8px;
   flex-shrink: 0;
+  margin-top: auto;
 }
 
 /* Author row */
@@ -1059,13 +1059,20 @@ tr.commit-row.selected .relative-time {
 
 /* Avatar */
 #detail-author-avatar {
-  width: 30px !important;
-  height: 30px !important;
+  width: 28px !important;
+  height: 28px !important;
   font-size: 11px !important;
+  font-weight: 600;
   border-radius: 50%;
   flex-shrink: 0;
-  border: 1.5px solid rgba(255, 255, 255, 0.12) !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  border: 1.5px solid rgba(255, 255, 255, 0.18) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   margin-right: 0 !important;
+  text-transform: uppercase;
 }
 
 .detail-author-text {
@@ -1080,6 +1087,7 @@ tr.commit-row.selected .relative-time {
   font-weight: 600;
   color: var(--fg-color);
   font-size: 12px;
+  line-height: 1.25;
   cursor: help;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1089,8 +1097,10 @@ tr.commit-row.selected .relative-time {
 .detail-author-date {
   font-size: 10.5px;
   color: var(--fg-muted);
+  line-height: 1.2;
   cursor: help;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Badges group (hash + merge) */
@@ -1105,20 +1115,31 @@ tr.commit-row.selected .relative-time {
 .detail-hash-copyable {
   font-family: var(--font-mono);
   font-size: 11px;
+  font-weight: 500;
   color: var(--badge-fg);
   cursor: pointer;
   background-color: var(--badge-bg);
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+  border-radius: var(--radius-sm, 4px);
   border: 1px solid var(--badge-border);
   user-select: none;
   transition: all var(--transition-fast);
   letter-spacing: 0.03em;
+  line-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .detail-hash-copyable:hover {
-  filter: brightness(1.2);
-  text-decoration: underline;
+  background-color: var(--row-hover-bg);
+  border-color: var(--accent);
+  color: var(--fg-color);
+  transform: translateY(-0.5px);
+}
+
+.detail-hash-copyable:active {
+  transform: translateY(0.5px);
 }
 
 /* Branches row */
@@ -1126,6 +1147,14 @@ tr.commit-row.selected .relative-time {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  padding-top: 1px;
+}
+
+.detail-branches-container .ref-badge {
+  font-size: 10.5px;
+  padding: 1.5px 6px;
+  border-radius: 10px;
+  line-height: 15px;
 }
 
 /* Commit message */
@@ -1133,17 +1162,18 @@ tr.commit-row.selected .relative-time {
 .details-message-container {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 2px;
+  gap: 5px;
+  margin-top: 1px;
 }
 
 .detail-msg-subject {
   font-size: 12.5px;
   font-weight: 600;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--fg-color);
   word-break: break-word;
   letter-spacing: 0.01em;
+  user-select: text;
 }
 
 .detail-msg-body {
@@ -1153,9 +1183,13 @@ tr.commit-row.selected .relative-time {
   word-break: break-word;
   background-color: rgba(128, 128, 128, 0.06);
   padding: 7px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-sm, 4px);
   border: 1px solid var(--border-subtle);
+  border-left: 2.5px solid var(--accent, #007fd4);
   line-height: 1.5;
+  max-height: 160px;
+  overflow-y: auto;
+  user-select: text;
 }
 
 /* ══════════════════════════════════════════════════
