@@ -50,8 +50,9 @@ describe('Format Utils', () => {
   it('getInitials should extract initials', () => {
     expect(getInitials('John Doe')).toBe('JD');
     expect(getInitials('John')).toBe('JO');
-    expect(getInitials('李四')).toBe('李四'); // Chinese support
-    expect(getInitials('王五六')).toBe('五六');
+    expect(getInitials('李四')).toBe('四'); // Chinese support
+    expect(getInitials('王五六')).toBe('六');
+    expect(getInitials('不见月')).toBe('月');
   });
 
   it('fmtNum should format numbers compactly', () => {

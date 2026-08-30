@@ -597,9 +597,8 @@ tr.commit-row.selected td.content-col {
 
 /* Ensure text inside selected rows uses the active selection foreground color for readability */
 tr.commit-row.selected .commit-message,
-tr.commit-row.selected .commit-meta,
-tr.commit-row.selected .commit-hash,
-tr.commit-row.selected .commit-author,
+tr.commit-row.selected .commit-author-inline,
+tr.commit-row.selected .commit-date-inline,
 tr.commit-row.selected .relative-time {
   color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
 }
@@ -608,21 +607,15 @@ tr.commit-row.selected .relative-time {
 .row-content {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   width: 100%;
-}
-
-.commit-main {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   overflow: hidden;
-  flex-grow: 1;
-  margin-right: 12px;
-  min-width: 0;
+  gap: 8px;
 }
 
+/* Message: fills all available remaining space, compresses first with ellipsis, never completely hidden */
 .commit-message {
+  flex: 1 1 0;
+  min-width: 40px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -630,74 +623,59 @@ tr.commit-row.selected .relative-time {
   font-weight: 500;
   font-size: 12px;
   letter-spacing: 0.01em;
-  min-width: 120px;
-  flex-shrink: 1;
 }
 
-.commit-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  color: var(--fg-muted);
-  font-size: 11px;
-}
-
-/* ── 每行分支名标签 ──────────────────────────── */
-.commit-branch-name {
+/* Badges (Branch/Tag chips): shown right after message or before author */
+.commit-badges {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
-  border: 1px solid;
-  border-radius: 20px;
-  padding: 0 6px;
-  line-height: 16px;
-  letter-spacing: 0.01em;
+  gap: 4px;
   flex-shrink: 0;
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0.85;
 }
 
-.commit-author {
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-}
-
+/* Author: fixed width column, right-aligned, neat visual column */
 .commit-author-inline {
   color: var(--fg-muted);
   font-size: 11px;
-  margin-left: 6px;
-  flex-shrink: 0;
-}
-
-.commit-date-inline {
-  color: var(--fg-muted);
-  font-size: 11px;
-  margin-left: 6px;
-  flex-shrink: 0;
-}
-
-.commit-date {
-  width: 116px;
-  min-width: 116px;
-  max-width: 116px;
-  text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  width: 85px;
+  min-width: 85px;
+  max-width: 85px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Date: fixed width column, right-aligned */
+.commit-date-inline {
   color: var(--fg-faint);
   font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 52px;
+  min-width: 52px;
+  max-width: 52px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── Content-width driven step-down hiding (driven by ResizeObserver on .left-pane) ── */
+
+/* Content width < 320px: hide date */
+.pane-hide-date .commit-date-inline {
+  display: none !important;
+}
+
+/* Content width < 220px: hide author */
+.pane-hide-author .commit-author-inline {
+  display: none !important;
+}
+
+/* Content width < 140px: hide badges */
+.pane-hide-badges .commit-badges {
+  display: none !important;
 }
 
 /* ── Hash chip ───────────────────────────────────── */
@@ -746,79 +724,99 @@ tr.commit-row.selected .relative-time {
   flex-shrink: 0;
   user-select: none;
   border: 1.5px solid rgba(255, 255, 255, 0.12);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 /* ── Branch / Tag badges ─────────────────────────── */
 .ref-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 0 5px;
-  border-radius: 10px;
+  gap: 3.5px;
+  padding: 0 6px;
+  border-radius: 9px;
   font-size: 9.5px;
-  font-weight: 600;
-  margin-right: 3px;
+  font-weight: 500;
   vertical-align: middle;
-  line-height: 14px;
+  line-height: 16px;
   white-space: nowrap;
-  letter-spacing: 0.02em;
-  height: 16px;
+  letter-spacing: 0.01em;
+  height: 18px;
+  box-sizing: border-box;
+  user-select: none;
+  transition: filter var(--transition-fast), transform var(--transition-fast);
+}
+
+.ref-badge:hover {
+  filter: brightness(1.18);
 }
 
 .ref-badge .codicon {
-  font-size: 10px;
+  font-size: 10.5px;
   flex-shrink: 0;
 }
 
-.commit-main .ref-badge {
-  max-width: 120px;
-  min-width: 50px;
-  flex-shrink: 1;
+.commit-badges .ref-badge,
+.ref-badge {
+  max-width: 130px;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
-.commit-main .ref-badge .badge-text {
+.ref-badge .badge-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-@media (max-width: 500px) {
-  .commit-author-inline {
-    display: none;
-  }
-}
-
-@media (max-width: 380px) {
-  .commit-date-inline {
-    display: none;
-  }
-}
 
 .badge-branch {
-  border: 1px solid rgba(128, 128, 128, 0.20);
+  border: 1px solid rgba(128, 128, 128, 0.25);
 }
 
 .badge-remote-branch {
-  border: 1px solid rgba(139, 92, 246, 0.35);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  background-color: rgba(168, 85, 247, 0.14);
+  color: #c084fc;
 }
 
 .badge-tag {
-  background-color: rgba(210, 153, 34, 0.12);
-  color: #e3b341;
-  border: 1px solid rgba(210, 153, 34, 0.35);
+  background-color: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
 }
 
 .badge-head {
-  background-color: var(--badge-bg);
-  color: var(--badge-fg);
-  border: 1px solid var(--badge-border);
-  font-weight: 700;
+  background-color: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.40);
+  font-weight: 600;
 }
 
 .badge-merge {
   background-color: rgba(168, 85, 247, 0.14);
   color: #c084fc;
   border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.badge-overflow {
+  background-color: rgba(128, 128, 128, 0.12);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-color);
+  cursor: default;
+  font-weight: 600;
+  font-size: 9px;
+  padding: 0 5px;
+  height: 18px;
+  border-radius: 9px;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.badge-overflow:hover {
+  background-color: rgba(128, 128, 128, 0.24);
+  color: var(--fg-color);
+  border-color: var(--fg-muted);
 }
 
 /* ── Relative time ───────────────────────────────── */
@@ -2723,4 +2721,101 @@ svg#graph-svg .merge-inner.hovered {
   min-width: 220px;
   transform: translate(-50%, -100%);
   margin-top: -12px;
+}
+
+/* ══════════════════════════════════════════════════
+   COMMIT HOVER POPOVER
+   ══════════════════════════════════════════════════ */
+.commit-hover-popover {
+  position: fixed;
+  z-index: 9999;
+  max-width: 440px;
+  min-width: 240px;
+  background-color: var(--vscode-editorHoverWidget-background, var(--surface-1));
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg-color));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--border-color));
+  border-radius: var(--radius-md, 7px);
+  padding: 10px 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.38), 0 0 0 1px var(--border-subtle);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  font-family: var(--font-family);
+  user-select: none;
+}
+
+.commit-hover-popover.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.commit-hover-popover .popover-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.commit-hover-popover .popover-hash {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--accent);
+  background-color: rgba(128, 128, 128, 0.10);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.commit-hover-popover .popover-hash .codicon {
+  font-size: 11px;
+}
+
+.commit-hover-popover .popover-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.commit-hover-popover .popover-msg {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--fg-color);
+  word-break: break-word;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.commit-hover-popover .popover-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+
+.commit-hover-popover .popover-avatar {
+  width: 18px;
+  height: 18px;
+  font-size: 9px;
+  margin-right: 0;
+}
+
+.commit-hover-popover .popover-author {
+  font-weight: 500;
+  color: var(--fg-color);
+}
+
+.commit-hover-popover .popover-date {
+  color: var(--fg-faint);
+  margin-left: auto;
+  font-size: 10.5px;
 }

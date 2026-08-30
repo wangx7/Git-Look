@@ -84,7 +84,7 @@ export function getInitials(name: string | undefined): string {
   name = name.trim();
   const isChinese = /[\u4e00-\u9fa5]/.test(name);
   if (isChinese) {
-    return name.length > 2 ? name.substring(name.length - 2) : name;
+    return name.slice(-1);
   }
   const parts = name.split(/\s+/);
   if (parts.length > 1) {

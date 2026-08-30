@@ -1,6 +1,6 @@
 import { state } from './state';
 import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, formatCommitDate, escapeHtml, hexToRgba } from './utils/format';
+import { colors, formatDate, formatCommitDate, escapeHtml, hexToRgba } from './utils/format';
 import { constants } from './constants';
 import { drawSvg, selectCircleInGraph, highlightLane, clearLaneHighlight } from './svgRenderer';
 import { renderInlineBadges } from './badgeRenderer';
@@ -76,26 +76,18 @@ export function renderVisibleRows(startIndex, endIndex) {
       tr.style.setProperty('--row-selected-glow-bg', hexToRgba(color, 0.08));
     }
 
-    const relTime = getRelativeTime(c.timestamp);
     const absTime = formatDate(c.timestamp);
     const commitDate = formatCommitDate(c.timestamp);
-
     const decsHtml = renderInlineBadges(c);
-
-    const inlineAuthorHtml = `<span class="commit-author-inline" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</span>`;
-    const inlineDateHtml = `<span class="commit-date-inline" title="${absTime}">${commitDate}</span>`;
-    const currentMaxLanes = rowMaxLanes[r] !== undefined ? rowMaxLanes[r] : 0;
 
     tr.innerHTML = `
         <td class="graph-col" style="width: ${state.currentGraphWidth}px; min-width: ${state.currentGraphWidth}px;"></td>
         <td class="content-col">
           <div class="row-content">
-            <div class="commit-main">
-              <span class="commit-message" title="${escapeHtml(c.message)}">${escapeHtml(c.message)}</span>
-              ${inlineAuthorHtml}
-              ${inlineDateHtml}
-              ${decsHtml}
-            </div>
+            <span class="commit-message" title="${escapeHtml(c.message)}">${escapeHtml(c.message)}</span>
+            ${decsHtml ? `<span class="commit-badges">${decsHtml}</span>` : ''}
+            <span class="commit-author-inline" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</span>
+            <span class="commit-date-inline" title="${absTime}">${commitDate}</span>
           </div>
         </td>
       `;

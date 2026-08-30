@@ -12,6 +12,8 @@ import { initMessageHandler } from './messageHandler';
 import { constants } from './constants';
 import { updateRepoSelector, updateRepoSelectorVisibility } from './repoSelector';
 
+import { initCommitTooltip } from './commitTooltip';
+
 window.vscode = acquireVsCodeApi();
 const vscode = window.vscode;
 
@@ -25,6 +27,7 @@ function init() {
   initMessageHandler();
   onRightPaneStateChange(saveCurrentState);
   onRequestVirtualListUpdate(updateVirtualList);
+  initCommitTooltip(elements.commitsTbody, elements.tableContainer);
 
   // Repo selector: send switchRepo when user picks a different repo
   if (elements.repoSelect) {

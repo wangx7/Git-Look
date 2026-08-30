@@ -14,6 +14,22 @@ const ICONS = {
 };
 
 /**
+ * Priority order helper for git ref decorations:
+ * 1. HEAD / HEAD -> local_branch (highest)
+ * 2. Local branch
+ * 3. Tags
+ * 4. Remote branches (e.g. origin/main)
+ * 5. Special remote refs (e.g. origin/HEAD)
+ */
+function getRefPriority(ref: string): number {
+  if (ref.startsWith('HEAD')) return 1;
+  if (!ref.startsWith('tag: ') && !ref.startsWith('origin/') && !state.remoteBranches.includes(ref)) return 2;
+  if (ref.startsWith('tag: ')) return 3;
+  if (ref === 'origin/HEAD' || ref.endsWith('/HEAD')) return 5;
+  return 4; // other remote branches
+}
+
+/**
  * Generate HTML for a single ref badge (branch/tag/HEAD/remote).
  */
 export function makeBadgeHtml(dec: string, overrideLabel?: string): string {
@@ -32,7 +48,7 @@ export function makeBadgeHtml(dec: string, overrideLabel?: string): string {
   } else if (isRemote) {
     badgeClass = 'badge-remote-branch';
     iconHtml = ICONS.cloud;
-  } else if (dec === 'HEAD') {
+  } else if (dec === 'HEAD' || dec.startsWith('HEAD')) {
     badgeClass = 'badge-head';
     iconHtml = ICONS.head;
     isHead = true;
@@ -40,44 +56,56 @@ export function makeBadgeHtml(dec: string, overrideLabel?: string): string {
 
   const style = isHead
     ? ``
-    : `background-color: ${hexToRgba(badgeColor, 0.15)}; color: ${badgeColor}; border-color: ${hexToRgba(badgeColor, 0.35)};`;
+    : `background-color: ${hexToRgba(badgeColor, 0.14)}; color: ${badgeColor}; border-color: ${hexToRgba(badgeColor, 0.35)};`;
 
   const styleAttr = style ? ` style="${style}"` : '';
-  return `<span class="ref-badge ${badgeClass}"${styleAttr}>${iconHtml}<span class="badge-text">${escapeHtml(displayDec)}</span></span>`;
+  return `<span class="ref-badge ${badgeClass}"${styleAttr} title="${escapeHtml(displayDec)}">${iconHtml}<span class="badge-text">${escapeHtml(displayDec)}</span></span>`;
 }
 
 /**
  * Build inline badge HTML for a commit row in the virtual list.
- * Shows first badge + "+N" overflow for remaining.
+ * Shows top priority badges (up to maxBadges) + "+N" overflow for remaining.
  */
-export function renderInlineBadges(commit: any): string {
+export function renderInlineBadges(commit: any, maxBadges: number = 2): string {
   if (!commit.decorations || commit.decorations.length === 0) return '';
 
-  let html = '';
+  const decs: string[] = [...commit.decorations];
+  const renderedBadges: string[] = [];
 
-  if (commit.decorations[0] === 'HEAD') {
-    const nextLocal = commit.decorations.slice(1).find((d: string) =>
-      !d.startsWith('origin/') && !d.startsWith('tag: ') && !state.remoteBranches.includes(d)
+  // 1. Check for HEAD and pair with local branch if available
+  const hasHead = decs.includes('HEAD');
+  if (hasHead) {
+    const nextLocal = decs.find((d: string) =>
+      d !== 'HEAD' && !d.startsWith('origin/') && !d.startsWith('tag: ') && !state.remoteBranches.includes(d)
     );
-    const headLabel = nextLocal ? `HEAD → ${nextLocal}` : 'HEAD';
-    html += makeBadgeHtml('HEAD', headLabel);
-
-    const remaining = commit.decorations.slice(1).filter((d: string) => d !== nextLocal);
-    if (remaining.length === 1) {
-      html += makeBadgeHtml(remaining[0]);
-    } else if (remaining.length > 1) {
-      const remainingNames = remaining.join(', ');
-      html += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="${escapeHtml(remainingNames)}">+${remaining.length}</span>`;
-    }
-  } else {
-    html += makeBadgeHtml(commit.decorations[0]);
-    if (commit.decorations.length > 1) {
-      const remainingNames = commit.decorations.slice(1).join(', ');
-      html += `<span class="ref-badge" style="background-color: rgba(255,255,255,0.06); color: var(--desc-fg); border: 1px solid var(--border-color); cursor: default;" title="${escapeHtml(remainingNames)}">+${commit.decorations.length - 1}</span>`;
+    if (nextLocal) {
+      renderedBadges.push(makeBadgeHtml('HEAD', `HEAD → ${nextLocal}`));
+      decs.splice(decs.indexOf('HEAD'), 1);
+      decs.splice(decs.indexOf(nextLocal), 1);
+    } else {
+      renderedBadges.push(makeBadgeHtml('HEAD'));
+      decs.splice(decs.indexOf('HEAD'), 1);
     }
   }
 
-  return html;
+  // 2. Sort remaining decorations by priority (Local > Tag > Remote > Special)
+  decs.sort((a, b) => getRefPriority(a) - getRefPriority(b));
+
+  // 3. Render up to maxBadges
+  while (decs.length > 0 && renderedBadges.length < maxBadges) {
+    const item = decs.shift()!;
+    renderedBadges.push(makeBadgeHtml(item));
+  }
+
+  // 4. Any remaining decorations become +N overflow badge
+  if (decs.length > 0) {
+    const remainingNames = decs.map(d => d.startsWith('tag: ') ? d.substring(5) : d).join(', ');
+    renderedBadges.push(
+      `<span class="ref-badge badge-overflow" title="${escapeHtml(remainingNames)}">+${decs.length}</span>`
+    );
+  }
+
+  return renderedBadges.join('');
 }
 
 /**

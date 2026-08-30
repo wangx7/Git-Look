@@ -88,6 +88,13 @@ export function initLayout() {
     const paneObserver = new ResizeObserver(entries => {
       if (!entries || entries.length === 0) return;
       const w = entries[0].contentRect.width;
+      const graphW = state.currentGraphWidth || 30;
+      const contentW = Math.max(0, w - graphW);
+
+      elements.leftPaneEl.classList.toggle('pane-hide-date', contentW < 300);
+      elements.leftPaneEl.classList.toggle('pane-hide-author', contentW < 210);
+      elements.leftPaneEl.classList.toggle('pane-hide-badges', contentW < 130);
+
       elements.leftPaneEl.classList.toggle('pane-medium', w < 480);
       elements.leftPaneEl.classList.toggle('pane-compact', w < 320);
       elements.leftPaneEl.classList.toggle('pane-narrow', w < 220);
