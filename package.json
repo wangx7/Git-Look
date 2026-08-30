@@ -2,7 +2,7 @@
   "name": "git-visual",
   "displayName": "Git Look",
   "description": "Git 可视化工具。提供分支潮汐、行作者、选区历史、文件历史、提交数据分析功能。",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "publisher": "wangx123",
   "author": "wangx7",
   "license": "MIT",
