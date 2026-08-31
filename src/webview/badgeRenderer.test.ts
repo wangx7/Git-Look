@@ -37,6 +37,13 @@ describe('badgeRenderer', () => {
       expect(html).toContain('HEAD');
       expect(html).toContain('codicon-circle-filled');
     });
+
+    it('renders a branch badge with overrideColor', () => {
+      const html = makeBadgeHtml('feature', undefined, '#ff00ff');
+      expect(html).toContain('badge-branch');
+      expect(html).toContain('feature');
+      expect(html).toContain('#ff00ff');
+    });
   });
 
   describe('renderInlineBadges', () => {
@@ -89,42 +96,19 @@ describe('badgeRenderer', () => {
     let mockContainer: any;
 
     beforeEach(() => {
-      const children: any[] = [];
+      let innerHTML = '';
       const classListSet = new Set<string>();
       mockContainer = {
-        children,
-        innerHTML: '',
+        get innerHTML() {
+          return innerHTML;
+        },
+        set innerHTML(val: string) {
+          innerHTML = val;
+        },
         classList: {
           add: (cls: string) => classListSet.add(cls),
           remove: (cls: string) => classListSet.delete(cls),
           contains: (cls: string) => classListSet.has(cls)
-        },
-        appendChild: (child: any) => {
-          children.push(child);
-        }
-      };
-
-      (global as any).document = {
-        createElement: (tag: string) => {
-          let innerHTML = '';
-          return {
-            tagName: tag.toUpperCase(),
-            style: { cssText: '' },
-            className: '',
-            get innerHTML() {
-              return innerHTML;
-            },
-            set innerHTML(val: string) {
-              innerHTML = val;
-              if (val) {
-                this.firstElementChild = {
-                  tagName: 'SPAN',
-                  className: 'ref-badge'
-                };
-              }
-            },
-            firstElementChild: null
-          };
         }
       };
     });
@@ -134,13 +118,35 @@ describe('badgeRenderer', () => {
         decorations: ['tag: v2.1.251', 'origin/main']
       };
       renderDetailBadges(commit, 'hash123', mockContainer);
-      expect(mockContainer.children.length).toBe(2);
+      expect(mockContainer.innerHTML).toContain('v2.1.251');
+      expect(mockContainer.innerHTML).toContain('origin/main');
       expect(mockContainer.classList.contains('hidden')).toBe(false);
     });
 
-    it('hides container when no badges exist', () => {
+    it('does not duplicate inferred lane branch if origin/remote already exists', () => {
+      state.commitBranchLabel['hash123'] = { name: 'feature-abc', color: '#ff0000' };
+      const commit = {
+        decorations: ['origin/feature-abc']
+      };
+      renderDetailBadges(commit, 'hash123', mockContainer);
+      expect(mockContainer.innerHTML).toContain('origin/feature-abc');
+      // Should only contain 1 badge and not duplicate feature-abc
+      const matches = mockContainer.innerHTML.match(/feature-abc/g);
+      expect(matches?.length).toBe(2); // One in title attribute, one in span text of the single badge
+    });
+
+    it('renders inferred lane branch if commit has no decorations', () => {
+      state.commitBranchLabel['hash123'] = { name: 'feature-xyz', color: '#00ff00' };
       const commit = { decorations: [] };
       renderDetailBadges(commit, 'hash123', mockContainer);
+      expect(mockContainer.innerHTML).toContain('feature-xyz');
+      expect(mockContainer.classList.contains('hidden')).toBe(false);
+    });
+
+    it('hides container when no badges exist and no lane branch', () => {
+      const commit = { decorations: [] };
+      renderDetailBadges(commit, 'hash123', mockContainer);
+      expect(mockContainer.innerHTML).toBe('');
       expect(mockContainer.classList.contains('hidden')).toBe(true);
     });
   });

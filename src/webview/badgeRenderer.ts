@@ -32,19 +32,20 @@ function getRefPriority(ref: string): number {
 /**
  * Generate HTML for a single ref badge (branch/tag/HEAD/remote).
  */
-export function makeBadgeHtml(dec: string, overrideLabel?: string): string {
+export function makeBadgeHtml(dec: string, overrideLabel?: string, overrideColor?: string): string {
   let badgeClass = 'badge-branch';
   let iconHtml = ICONS.branch;
-  let badgeColor = state.branchColorMap.get(dec) || colors[0];
+  const cleanDec = dec.replace(/^origin\//, '').replace(/^refs\/remotes\/[^/]+\//, '');
+  let badgeColor = overrideColor || state.branchColorMap.get(dec) || state.branchColorMap.get(cleanDec) || colors[0];
   let isHead = false;
-  const isRemote = state.remoteBranches.includes(dec) || dec.startsWith('origin/');
+  const isRemote = state.remoteBranches.includes(dec) || dec.startsWith('origin/') || dec.startsWith('refs/remotes/');
   let displayDec = overrideLabel || dec;
 
   if (dec.startsWith('tag: ')) {
     badgeClass = 'badge-tag';
     iconHtml = ICONS.tag;
     displayDec = overrideLabel || dec.substring(5);
-    badgeColor = '#f59e0b';
+    badgeColor = overrideColor || '#f59e0b';
   } else if (isRemote) {
     badgeClass = 'badge-remote-branch';
     iconHtml = ICONS.cloud;
@@ -113,38 +114,35 @@ export function renderInlineBadges(commit: any, maxBadges: number = 2): string {
  * Also shows inferred lane branch if not already in decorations.
  */
 export function renderDetailBadges(commit: any, hash: string, container: HTMLElement): void {
-  container.innerHTML = '';
-  let hasBadges = false;
+  const renderedBadges: string[] = [];
 
-  if (commit.decorations && commit.decorations.length > 0) {
-    hasBadges = true;
-    container.classList.remove('hidden');
+  if (commit && commit.decorations && commit.decorations.length > 0) {
     commit.decorations.forEach((dec: string) => {
-      const span = document.createElement('span');
-      // Re-use makeBadgeHtml but parse it into DOM
-      const temp = document.createElement('div');
-      temp.innerHTML = makeBadgeHtml(dec);
-      const badge = temp.firstElementChild as HTMLElement;
-      if (badge) container.appendChild(badge);
+      renderedBadges.push(makeBadgeHtml(dec));
     });
   }
 
-  // Append inferred lane branch if not already in decorations
+  // Append inferred lane branch only if no corresponding branch decoration is already shown
   const laneBranch = state.commitBranchLabel[hash];
   if (laneBranch && laneBranch.name) {
-    const alreadyShown = commit.decorations && commit.decorations.includes(laneBranch.name);
-    if (!alreadyShown) {
-      hasBadges = true;
-      container.classList.remove('hidden');
-      const span = document.createElement('span');
-      span.className = 'ref-badge badge-branch';
-      span.style.cssText = `background-color: ${hexToRgba(laneBranch.color, 0.15)}; color: ${laneBranch.color}; border-color: ${hexToRgba(laneBranch.color, 0.35)}; border-radius: 10px;`;
-      span.innerHTML = `${ICONS.branch}${escapeHtml(laneBranch.name)}`;
-      container.appendChild(span);
+    const isAlreadyShown = commit && commit.decorations && commit.decorations.some((d: string) => {
+      if (d === laneBranch.name) return true;
+      if (d.replace(/^origin\//, '') === laneBranch.name) return true;
+      if (d.replace(/^refs\/remotes\/[^/]+\//, '') === laneBranch.name) return true;
+      if (d.startsWith('tag: ') && d.substring(5) === laneBranch.name) return true;
+      return false;
+    });
+
+    if (!isAlreadyShown) {
+      renderedBadges.push(makeBadgeHtml(laneBranch.name, undefined, laneBranch.color));
     }
   }
 
-  if (!hasBadges) {
+  if (renderedBadges.length > 0) {
+    container.innerHTML = renderedBadges.join('');
+    container.classList.remove('hidden');
+  } else {
+    container.innerHTML = '';
     container.classList.add('hidden');
   }
 }

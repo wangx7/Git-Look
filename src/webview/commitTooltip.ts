@@ -42,10 +42,15 @@ export function showCommitTooltip(commit: any, anchorX: number, anchorY: number)
   const dateStr = formatDate(commit.timestamp);
   const relTime = getRelativeTime(commit.timestamp);
 
-  // Render all decoration badges
+  // Render all decoration badges, or fallback to inferred lane branch if available
   let badgesHtml = '';
   if (commit.decorations && commit.decorations.length > 0) {
     badgesHtml = commit.decorations.map((d: string) => makeBadgeHtml(d)).join('');
+  } else if (commit.hash) {
+    const laneBranch = state.commitBranchLabel[commit.hash];
+    if (laneBranch && laneBranch.name) {
+      badgesHtml = makeBadgeHtml(laneBranch.name, undefined, laneBranch.color);
+    }
   }
 
   popover.innerHTML = `
