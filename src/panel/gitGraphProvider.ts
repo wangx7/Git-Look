@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri, toWorkingTreeUri, suppressWatchRefresh, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory, getWorkingTreeStatus, getWorktrees, WorktreeInfo } from '../gitHelper';
+import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory, getWorkingTreeStatus, getWorktrees, WorktreeInfo } from '../gitHelper';
 import { RepoManager } from '../repoManager';
 
 export interface IBlameManager {
@@ -394,7 +394,9 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
               leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
             }
 
-            const rightUri = fileUri;
+            const rightUri = fs.existsSync(absoluteFilePath)
+              ? fileUri
+              : vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
             const title = `${path.basename(file)} (HEAD vs 本地工作区)`;
             await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
             break;
@@ -493,9 +495,10 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           // If we have exact historic paths from git log -L parsing, use them directly!
           // This is highly optimized and perfectly handles file renames.
           if (isWorkingTree) {
-            // 工作区未提交修改：使用 stash create 获取真实内容，同时保留 git 行信息
-            suppressWatchRefresh();
-            rightUri = await toWorkingTreeUri(vscode.Uri.file(absoluteFilePath), gitRoot);
+            // 工作区未提交修改：若文件在磁盘存在，使用物理文件 URI 保证可编辑；若已删除，使用空文档
+            rightUri = fs.existsSync(absoluteFilePath)
+              ? vscode.Uri.file(absoluteFilePath)
+              : vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
           } else if (newFilePath) {
             try {
               await execGit(['cat-file', '-e', `${hash}:${newFilePath}`], gitRoot);
@@ -590,19 +593,10 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             }
           }
 
-          // Right side: current working tree (latest local changes, fallback to HEAD if no uncommitted changes)
-          let rightUri: vscode.Uri;
-          try {
-            const hasLocalMod = await hasFileLocalModifications(gitRoot, absoluteFilePath);
-            if (hasLocalMod) {
-              suppressWatchRefresh();
-              rightUri = await toWorkingTreeUri(vscode.Uri.file(absoluteFilePath), gitRoot);
-            } else {
-              rightUri = await toGitUri(vscode.Uri.file(absoluteFilePath), 'HEAD');
-            }
-          } catch (e) {
-            rightUri = await toGitUri(vscode.Uri.file(absoluteFilePath), 'HEAD');
-          }
+          // Right side: current working tree (use physical file URI when existing, matching native VS Code diff)
+          const rightUri = fs.existsSync(absoluteFilePath)
+            ? vscode.Uri.file(absoluteFilePath)
+            : vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
 
           const title = `${path.basename(relativeFilePath)} (${hash.substring(0, 7)} vs 本地工作区)`;
 
@@ -651,31 +645,55 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         case 'openAllDiffs': {
           try {
             const { hash, files, parentHash, message } = data;
+            const isWorkingTree = (hash === '*working-tree*');
             const resourceList = await Promise.all(files.map(async (f: any) => {
               const absoluteFilePath = path.join(gitRoot, f.path);
               const fileUri = vscode.Uri.file(absoluteFilePath);
               
               let leftUri: vscode.Uri;
-              if (f.status === 'A' || !parentHash || parentHash === 'empty') {
-                leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+              if (isWorkingTree) {
+                if (f.status === 'A' || f.status === '?') {
+                  leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+                } else {
+                  try {
+                    await execGit(['cat-file', '-e', `HEAD:${f.path}`], gitRoot);
+                    leftUri = await toGitUri(fileUri, 'HEAD');
+                  } catch {
+                    leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+                  }
+                }
               } else {
-                leftUri = await toGitUri(fileUri, parentHash);
+                if (f.status === 'A' || !parentHash || parentHash === 'empty') {
+                  leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+                } else {
+                  leftUri = await toGitUri(fileUri, parentHash);
+                }
               }
 
               let rightUri: vscode.Uri;
-              if (f.status === 'D') {
-                rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+              if (isWorkingTree) {
+                if (f.status === 'D' || !fs.existsSync(absoluteFilePath)) {
+                  rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+                } else {
+                  rightUri = fileUri;
+                }
               } else {
-                rightUri = await toGitUri(fileUri, hash);
+                if (f.status === 'D') {
+                  rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+                } else {
+                  rightUri = await toGitUri(fileUri, hash);
+                }
               }
 
               // vscode.changes expects [labelUri, leftUri, rightUri]:
               // - labelUri (index 0): used for the tab title / file name display
               // - leftUri  (index 1): original (parent/older) side
               // - rightUri (index 2): modified (newer) side
-              return [rightUri, leftUri, rightUri];
+              return [fileUri, leftUri, rightUri];
             }));
-            const title = `${hash.substring(0, 7)} - ${message || ''} (${files.length} 个文件)`;
+            const title = isWorkingTree
+              ? `工作区未提交修改 (${files.length} 个文件)`
+              : `${hash.substring(0, 7)} - ${message || ''} (${files.length} 个文件)`;
             console.log(`[Git 可视化] openAllDiffs: opening ${resourceList.length} changes with title "${title}"`);
             await vscode.commands.executeCommand('vscode.changes', title, resourceList);
           } catch (e: any) {

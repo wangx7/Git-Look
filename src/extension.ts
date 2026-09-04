@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { GitGraphProvider } from './panel/gitGraphProvider';
-import { execGit, traceLineHistory, hasLocalModifications, clearGitCache, traceFileHistory, hasFileLocalModifications, toGitUri, toWorkingTreeUri, suppressWatchRefresh } from './gitHelper';
+import { execGit, traceLineHistory, hasLocalModifications, clearGitCache, traceFileHistory, hasFileLocalModifications, toGitUri } from './gitHelper';
 import { BlameAnnotationsManager } from './blameAnnotations';
 import { FileHeaderCodeLensProvider } from './fileHeaderCodeLens';
 import { RepoManager } from './repoManager';
@@ -280,7 +280,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Register Open File Recent Diff command
   const openFileRecentDiffCommand = vscode.commands.registerCommand('git-visual.openFileRecentDiff', async (filePath: string, diffKind: 'workingTree' | 'commit', hash?: string, isNewFile?: boolean) => {
-    if (!filePath || isNewFile) {
+    if (!filePath) {
       return;
     }
 
@@ -294,11 +294,26 @@ export async function activate(context: vscode.ExtensionContext) {
     const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
 
     try {
-      if (diffKind === 'workingTree') {
-        const leftUri = await toGitUri(fileUri, 'HEAD');
-        suppressWatchRefresh();
-        const rightUri = await toWorkingTreeUri(fileUri, gitRoot);
-        const title = `${path.basename(filePath)} (HEAD vs 工作区)`;
+      if (diffKind === 'workingTree' || isNewFile) {
+        let leftUri: vscode.Uri;
+        try {
+          if (!isNewFile) {
+            await execGit(['cat-file', '-e', `HEAD:${repoFilePath}`], gitRoot);
+            leftUri = await toGitUri(fileUri, 'HEAD');
+          } else {
+            leftUri = vscode.Uri.from({ scheme: 'git-visual', path: filePath });
+          }
+        } catch {
+          // File does not exist in HEAD (e.g. newly added or untracked file)
+          leftUri = vscode.Uri.from({ scheme: 'git-visual', path: filePath });
+        }
+        // 若文件在工作区物理存在，直接使用 fileUri，确保右侧编辑器处于可写状态（去除 🔒 锁定，支持实时编辑保存）；若已被删除，回退到空虚拟文档
+        const rightUri = fs.existsSync(filePath)
+          ? fileUri
+          : vscode.Uri.from({ scheme: 'git-visual', path: filePath });
+        const title = isNewFile
+          ? `${path.basename(filePath)} (未跟踪 vs 工作区)`
+          : `${path.basename(filePath)} (HEAD vs 工作区)`;
         await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
       } else if (hash) {
         const parentHash = (await execGit(['log', '-1', '--pretty=%P', hash], gitRoot)).trim().split(' ')[0];

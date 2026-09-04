@@ -99,6 +99,15 @@ describe('extractBranchFromDecorations', () => {
     const decs = ['HEAD -> main', 'origin/main'];
     expect(extractBranchFromDecorations(decs, ['origin/main'])).toBe('main');
   });
+
+  it('filters out Working Tree, bare HEAD, and tags', () => {
+    expect(extractBranchFromDecorations(['Working Tree'])).toBeNull();
+    expect(extractBranchFromDecorations(['HEAD'])).toBeNull();
+    expect(extractBranchFromDecorations(['tag: v1.0.0'])).toBeNull();
+    expect(extractBranchFromDecorations(['Working Tree', 'tag: v1.0.0', 'HEAD'])).toBeNull();
+    expect(extractBranchFromDecorations(['tag: v1.0.0', 'origin/dev', 'Working Tree'])).toBe('dev');
+    expect(extractBranchFromDecorations(['HEAD -> 社区商城', 'Working Tree'])).toBe('社区商城');
+  });
 });
 
 describe('inferCommitBranches', () => {
@@ -167,5 +176,88 @@ describe('inferCommitBranches', () => {
     // Intermediate commits c2 and c3 are accurately inferred as fix/http-proxy-rc-version
     expect(branchLabels['c2'].name).toBe('fix/http-proxy-rc-version');
     expect(branchLabels['c3'].name).toBe('fix/http-proxy-rc-version');
+  });
+
+  it('performs dynamic branch handoff from feature branch (社区商城) to base branch (dev) on trunk', () => {
+    // Topology:
+    // c_wt (*working-tree*)        -> parents: [c_head]
+    // c_head (HEAD -> 社区商城)     -> parents: [c_feat_inter]
+    // c_feat_inter (81262100)      -> parents: [c_dev_tip]
+    // c_dev_tip (378eff5b, dev)    -> parents: [c_dev_inter]
+    // c_dev_inter (9c7d5c45)       -> parents: [c_dev_base]
+    // c_dev_base (4fbdd48)         -> parents: []
+    const commits = [
+      {
+        hash: '*working-tree*',
+        parents: ['c_head'],
+        decorations: ['Working Tree'],
+        message: '未提交的修改'
+      },
+      {
+        hash: 'c_head',
+        parents: ['c_feat_inter'],
+        decorations: ['HEAD -> 社区商城', 'origin/社区商城'],
+        message: 'feat: head commit on feature branch'
+      },
+      {
+        hash: 'c_feat_inter',
+        parents: ['c_dev_tip'],
+        decorations: [],
+        message: 'feat: intermediate commit on feature branch (81262100)'
+      },
+      {
+        hash: 'c_dev_tip',
+        parents: ['c_dev_inter'],
+        decorations: ['dev', 'origin/dev'],
+        message: 'dev: tip commit of dev branch (378eff5b)'
+      },
+      {
+        hash: 'c_dev_inter',
+        parents: ['c_dev_base'],
+        decorations: [],
+        message: 'dev: intermediate commit on dev (9c7d5c45)'
+      },
+      {
+        hash: 'c_dev_base',
+        parents: [],
+        decorations: [],
+        message: 'dev: base commit'
+      }
+    ];
+
+    const commitNodes: Record<string, any> = {
+      '*working-tree*': { row: 0, lane: 0, colorIdx: 0 },
+      'c_head': { row: 1, lane: 0, colorIdx: 0 },
+      'c_feat_inter': { row: 2, lane: 0, colorIdx: 0 },
+      'c_dev_tip': { row: 3, lane: 0, colorIdx: 0 },
+      'c_dev_inter': { row: 4, lane: 0, colorIdx: 0 },
+      'c_dev_base': { row: 5, lane: 0, colorIdx: 0 }
+    };
+
+    const hashToCommitMap = new Map(commits.map(c => [c.hash, c]));
+    const mainTrunk = new Set(commits.map(c => c.hash));
+
+    const branchLabels = inferCommitBranches(
+      commits,
+      commitNodes,
+      [],
+      hashToCommitMap,
+      mainTrunk,
+      ['origin/社区商城', 'origin/dev']
+    );
+
+    // 1. Feature branch commits above fork point are accurately inferred as '社区商城'
+    expect(branchLabels['c_head'].name).toBe('社区商城');
+    expect(branchLabels['c_feat_inter'].name).toBe('社区商城');
+
+    // 2. Fork point with explicit 'dev' ref is 'dev'
+    expect(branchLabels['c_dev_tip'].name).toBe('dev');
+
+    // 3. Trunk ancestors below fork point dynamically switch to 'dev' (Branch Handoff)
+    expect(branchLabels['c_dev_inter'].name).toBe('dev');
+    expect(branchLabels['c_dev_base'].name).toBe('dev');
+
+    // 4. Working tree node belongs to trunk branch '社区商城', NEVER 'Working Tree'
+    expect(branchLabels['*working-tree*'].name).toBe('社区商城');
   });
 });

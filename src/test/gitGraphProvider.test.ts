@@ -165,19 +165,58 @@ describe('GitGraphProvider Diff Logic', () => {
         expect.any(String),
         expect.arrayContaining([
           expect.arrayContaining([
-            expect.objectContaining({ scheme: 'git', query: 'mocked' }),
+            expect.objectContaining({ scheme: 'file' }),
             expect.objectContaining({ scheme: 'git-visual' }),
             expect.objectContaining({ scheme: 'git', query: 'mocked' })
           ]),
           expect.arrayContaining([
-            expect.objectContaining({ scheme: 'git-visual' }),
+            expect.objectContaining({ scheme: 'file' }),
             expect.objectContaining({ scheme: 'git', query: 'mocked' }),
             expect.objectContaining({ scheme: 'git-visual' })
           ]),
           expect.arrayContaining([
-            expect.objectContaining({ scheme: 'git', query: 'mocked' }),
+            expect.objectContaining({ scheme: 'file' }),
             expect.objectContaining({ scheme: 'git', query: 'mocked' }),
             expect.objectContaining({ scheme: 'git', query: 'mocked' })
+          ])
+        ])
+      );
+    });
+
+    it('should open multi diff for working tree with HEAD and physical fileUri', async () => {
+      const message = {
+        command: 'openAllDiffs',
+        hash: '*working-tree*',
+        message: '未提交的修改 (2 个文件)',
+        files: [
+          { path: 'added.ts', status: 'A' },
+          { path: 'modified.ts', status: 'M' }
+        ]
+      };
+
+      (gitHelper.execGit as jest.Mock).mockImplementation(async (args) => {
+        if (args && args[0] === 'rev-parse') return '/mock/git/root';
+        return '';
+      });
+      (gitHelper.toGitUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'head-mock' });
+
+      const listenerRef = { current: null };
+      provider.resolveWebviewView(createMockWebviewView(listenerRef));
+      await (listenerRef.current as any)(message);
+
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'vscode.changes',
+        '工作区未提交修改 (2 个文件)',
+        expect.arrayContaining([
+          expect.arrayContaining([
+            expect.objectContaining({ scheme: 'file' }),
+            expect.objectContaining({ scheme: 'git-visual' }),
+            expect.objectContaining({ scheme: 'file' })
+          ]),
+          expect.arrayContaining([
+            expect.objectContaining({ scheme: 'file' }),
+            expect.objectContaining({ scheme: 'git', query: 'head-mock' }),
+            expect.objectContaining({ scheme: 'file' })
           ])
         ])
       );
@@ -185,14 +224,12 @@ describe('GitGraphProvider Diff Logic', () => {
   });
 
   describe('openFileHistoryDiff', () => {
-    it('should use toWorkingTreeUri when file has local modifications', async () => {
+    it('should use editable physical file URI for working tree side', async () => {
       (gitHelper.execGit as jest.Mock).mockImplementation(async (args: any[]) => {
         if (args && args[0] === 'rev-parse') return '/mock/git/root';
         return '';
       });
       (gitHelper.toGitUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'head-mock' });
-      (gitHelper.toWorkingTreeUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'working-tree-mock' });
-      (gitHelper.hasFileLocalModifications as jest.Mock).mockResolvedValue(true);
 
       const message = {
         command: 'openFileHistoryDiff',
@@ -207,55 +244,22 @@ describe('GitGraphProvider Diff Logic', () => {
       provider.resolveWebviewView(createMockWebviewView(listenerRef));
       await (listenerRef.current as any)(message);
 
-      expect(gitHelper.toWorkingTreeUri).toHaveBeenCalled();
-      expect(gitHelper.suppressWatchRefresh).toHaveBeenCalled();
       expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
         'vscode.diff',
         expect.anything(),
-        expect.objectContaining({ scheme: 'git', query: 'working-tree-mock' }),
-        expect.stringContaining('本地工作区')
-      );
-    });
-
-    it('should use HEAD when file has no local modifications', async () => {
-      (gitHelper.execGit as jest.Mock).mockImplementation(async (args: any[]) => {
-        if (args && args[0] === 'rev-parse') return '/mock/git/root';
-        return '';
-      });
-      (gitHelper.toGitUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'head-mock' });
-      (gitHelper.hasFileLocalModifications as jest.Mock).mockResolvedValue(false);
-
-      const message = {
-        command: 'openFileHistoryDiff',
-        file: 'src/test.ts',
-        hash: 'abc123',
-        parentHash: 'def456',
-        oldFilePath: null,
-        newFilePath: null
-      };
-
-      const listenerRef = { current: null };
-      provider.resolveWebviewView(createMockWebviewView(listenerRef));
-      await (listenerRef.current as any)(message);
-
-      expect(gitHelper.toWorkingTreeUri).not.toHaveBeenCalled();
-      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
-        'vscode.diff',
-        expect.anything(),
-        expect.objectContaining({ scheme: 'git', query: 'head-mock' }),
+        expect.objectContaining({ scheme: 'file', fsPath: path.join('/mock/git/root', 'src/test.ts') }),
         expect.stringContaining('本地工作区')
       );
     });
   });
 
   describe('openSingleDiff', () => {
-    it('should use toWorkingTreeUri when hash is HEAD (working tree changes)', async () => {
+    it('should use editable physical fileUri when hash is HEAD (working tree changes)', async () => {
       (gitHelper.execGit as jest.Mock).mockImplementation(async (args: any[]) => {
         if (args && args[0] === 'rev-parse') return '/mock/git/root';
         return '';
       });
       (gitHelper.toGitUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'history-mock' });
-      (gitHelper.toWorkingTreeUri as jest.Mock).mockResolvedValue({ scheme: 'git', query: 'working-tree-mock' });
 
       const message = {
         command: 'openSingleDiff',
@@ -271,12 +275,10 @@ describe('GitGraphProvider Diff Logic', () => {
       provider.resolveWebviewView(createMockWebviewView(listenerRef));
       await (listenerRef.current as any)(message);
 
-      expect(gitHelper.toWorkingTreeUri).toHaveBeenCalled();
-      expect(gitHelper.suppressWatchRefresh).toHaveBeenCalled();
       expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
         'vscode.diff',
         expect.anything(),
-        expect.objectContaining({ scheme: 'git', query: 'working-tree-mock' }),
+        expect.objectContaining({ scheme: 'file', fsPath: path.join('/mock/git/root', 'src/test.ts') }),
         expect.stringContaining('本地工作区'),
         expect.anything()
       );

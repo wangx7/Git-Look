@@ -52,7 +52,7 @@ export function showCommitTooltip(commit: any, anchorX: number, anchorY: number)
 
   if (commit.hash) {
     const laneBranch = state.commitBranchLabel[commit.hash];
-    if (laneBranch && laneBranch.name) {
+    if (laneBranch && laneBranch.name && laneBranch.name !== 'Working Tree') {
       const isAlreadyShown = commit.decorations && commit.decorations.some((d: string) => {
         if (d === laneBranch.name) return true;
         if (d.replace(/^origin\//, '') === laneBranch.name) return true;

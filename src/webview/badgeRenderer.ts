@@ -140,7 +140,7 @@ export function renderDetailBadges(commit: any, hash: string, container: HTMLEle
 
   // Append inferred lane branch only if no corresponding branch decoration is already shown
   const laneBranch = state.commitBranchLabel[hash];
-  if (laneBranch && laneBranch.name) {
+  if (laneBranch && laneBranch.name && laneBranch.name !== 'Working Tree') {
     const isAlreadyShown = commit && commit.decorations && commit.decorations.some((d: string) => {
       if (d === laneBranch.name) return true;
       if (d.replace(/^origin\//, '') === laneBranch.name) return true;

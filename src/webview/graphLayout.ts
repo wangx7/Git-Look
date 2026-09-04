@@ -135,27 +135,32 @@ export function parseMergeMessage(message: string): MergeBranchInfo | null {
 export function extractBranchFromDecorations(decorations: string[] | undefined, remoteBranches: string[] = []): string | null {
   if (!decorations || decorations.length === 0) return null;
 
-  // 1. Prefer local branch
-  const localBranch = decorations.find(d =>
+  // 1. Filter out pseudo/non-branch decorations
+  const validDecs = decorations.filter(d =>
+    d !== 'Working Tree' &&
     d !== 'HEAD' &&
-    !d.startsWith('HEAD ->') &&
+    !d.startsWith('tag: ')
+  );
+  if (validDecs.length === 0) return null;
+
+  // 2. Local branch in HEAD pointer: "HEAD -> main"
+  const headPtr = validDecs.find(d => d.startsWith('HEAD -> '));
+  if (headPtr) {
+    return headPtr.substring(8).replace(/^origin\//, '').replace(/^refs\/remotes\/[^\/]+\//, '').trim();
+  }
+
+  // 3. Local branch directly
+  const localBranch = validDecs.find(d =>
     !d.startsWith('origin/') &&
     !d.startsWith('refs/remotes/') &&
-    !d.startsWith('tag: ') &&
     !remoteBranches.includes(d)
   );
   if (localBranch) {
     return localBranch;
   }
 
-  // 2. Local branch in HEAD pointer: "HEAD -> main"
-  const headPtr = decorations.find(d => d.startsWith('HEAD -> '));
-  if (headPtr) {
-    return headPtr.substring(8).trim();
-  }
-
-  // 3. Remote branch: "origin/feat-1" or in remoteBranches
-  const remoteDec = decorations.find(d =>
+  // 4. Remote branch: "origin/feat-1" or in remoteBranches
+  const remoteDec = validDecs.find(d =>
     d.startsWith('origin/') || d.startsWith('refs/remotes/') || remoteBranches.includes(d)
   );
   if (remoteDec) {
@@ -169,8 +174,8 @@ export function extractBranchFromDecorations(decorations: string[] | undefined, 
  * Infer the branch name for every commit in the graph using:
  * 1. Explicit commit decorations (local & remote branch pointers)
  * 2. Merge commit message semantic parsing (PR # / merge into)
- * 3. Topological downward DAG propagation along parent lanes
- * 4. Trunk anchoring for main/master line
+ * 3. Topological downward DAG propagation along parent lanes with active branch handoff
+ * 4. Trunk anchoring with dynamic branch switching at fork points
  */
 export function inferCommitBranches(
   commits: any[],
@@ -182,22 +187,9 @@ export function inferCommitBranches(
 ): Record<string, { name: string | null; color: string }> {
   const commitToBranch = new Map<string, string>();
 
-  // 1. Identify trunk branch name (e.g. 'main' or 'master')
-  let trunkBranchName = 'main';
-  for (const c of commits) {
-    if (mainTrunk.has(c.hash)) {
-      const decBranch = extractBranchFromDecorations(c.decorations, remoteBranches);
-      if (decBranch) {
-        trunkBranchName = decBranch;
-        break;
-      }
-    }
-  }
-
-  // 2. First pass: Seed known branches from direct decorations and explicit merge messages
+  // 1. First pass: Seed known branches from direct decorations and explicit merge messages
   commits.forEach(c => {
     if (c.hash === '*working-tree*') {
-      commitToBranch.set(c.hash, trunkBranchName);
       return;
     }
 
@@ -209,6 +201,9 @@ export function inferCommitBranches(
     if (c.parents && c.parents.length >= 2) {
       const mergeInfo = parseMergeMessage(c.message);
       if (mergeInfo) {
+        if (mergeInfo.targetBranch && !commitToBranch.has(c.hash)) {
+          commitToBranch.set(c.hash, mergeInfo.targetBranch);
+        }
         if (mergeInfo.sourceBranch && !commitToBranch.has(c.parents[1])) {
           commitToBranch.set(c.parents[1], mergeInfo.sourceBranch);
         }
@@ -219,27 +214,55 @@ export function inferCommitBranches(
     }
   });
 
-  // 3. Second pass: Downward DAG propagation along parent edges
+  // 2. Identify initial trunk branch name from the first decorated commit on trunk
+  let currentTrunkBranch = 'main';
+  for (const c of commits) {
+    if (c.hash !== '*working-tree*' && mainTrunk.has(c.hash)) {
+      const decBranch = extractBranchFromDecorations(c.decorations, remoteBranches);
+      if (decBranch) {
+        currentTrunkBranch = decBranch;
+        break;
+      }
+    }
+  }
+
+  // Working tree node belongs to the active trunk branch
+  if (mainTrunk.has('*working-tree*')) {
+    commitToBranch.set('*working-tree*', currentTrunkBranch);
+  }
+
+  // 3. Second pass: Downward DAG propagation along parent edges with dynamic branch handoff
   const laneCurrentBranch = new Map<number, string>();
 
   for (let r = 0; r < commits.length; r++) {
     const c = commits[r];
+    if (c.hash === '*working-tree*') {
+      continue;
+    }
+
     const hash = c.hash;
     const node = commitNodes[hash];
     const lane = node ? node.lane : undefined;
+    const isTrunk = mainTrunk.has(hash);
 
     let branch = commitToBranch.get(hash);
 
-    if (!branch && mainTrunk.has(hash)) {
-      branch = trunkBranchName;
+    // Dynamic branch handoff: If this commit has an explicit branch decoration and is on the trunk,
+    // update the active trunk branch (e.g. switching from feature branch to dev/main trunk)!
+    if (branch && isTrunk) {
+      currentTrunkBranch = branch;
+    } else if (!branch && isTrunk) {
+      branch = currentTrunkBranch;
       commitToBranch.set(hash, branch);
     }
 
+    // If a side lane commit has no branch yet, check if its lane has a known branch
     if (!branch && lane !== undefined && laneCurrentBranch.has(lane)) {
       branch = laneCurrentBranch.get(lane);
       commitToBranch.set(hash, branch!);
     }
 
+    // Track current active branch for this lane
     if (branch && lane !== undefined) {
       laneCurrentBranch.set(lane, branch);
     }
@@ -247,27 +270,35 @@ export function inferCommitBranches(
     const parents = c.parents || [];
     if (parents.length === 1) {
       const p0 = parents[0];
-      if (branch && !commitToBranch.has(p0)) {
-        const cIsTrunk = mainTrunk.has(hash);
-        const p0IsTrunk = mainTrunk.has(p0);
-        if (!cIsTrunk && !p0IsTrunk) {
+      if (!commitToBranch.has(p0)) {
+        if (mainTrunk.has(p0)) {
+          commitToBranch.set(p0, currentTrunkBranch);
+        } else if (branch) {
           commitToBranch.set(p0, branch);
-        } else if (cIsTrunk && p0IsTrunk) {
-          commitToBranch.set(p0, trunkBranchName);
         }
       }
     } else if (parents.length >= 2) {
       const p0 = parents[0];
       const p1 = parents[1];
 
-      if (branch && !commitToBranch.has(p0)) {
-        commitToBranch.set(p0, branch);
+      if (!commitToBranch.has(p0)) {
+        if (mainTrunk.has(p0)) {
+          commitToBranch.set(p0, currentTrunkBranch);
+        } else if (branch) {
+          commitToBranch.set(p0, branch);
+        }
       }
 
       const mergeInfo = parseMergeMessage(c.message);
       const secondaryBranch = mergeInfo?.sourceBranch || commitToBranch.get(p1);
       if (secondaryBranch) {
-        commitToBranch.set(p1, secondaryBranch);
+        if (!commitToBranch.has(p1)) {
+          if (mainTrunk.has(p1)) {
+            commitToBranch.set(p1, currentTrunkBranch);
+          } else {
+            commitToBranch.set(p1, secondaryBranch);
+          }
+        }
         const p1Node = commitNodes[p1];
         if (p1Node && p1Node.lane !== undefined) {
           laneCurrentBranch.set(p1Node.lane, secondaryBranch);
