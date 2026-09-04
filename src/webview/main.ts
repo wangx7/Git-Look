@@ -185,7 +185,7 @@ function init() {
       window._pendingForceExpand = true;
     }
     vscode.postMessage({ command: 'initWatcher' });
-    requestStats(getFilters());
+    reloadData({ silent: true });
   } else {
     // Initial load
     reloadData(true);

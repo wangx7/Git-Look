@@ -54,6 +54,7 @@ function createMockRepoManager() {
     selectedIndex: 0,
     onDidChangeRepos: () => ({ dispose: jest.fn() }),
     onDidChangeSelection: () => ({ dispose: jest.fn() }),
+    onDidChangeGitState: () => ({ dispose: jest.fn() }),
     selectRepo: jest.fn(),
   } as any;
 }
@@ -69,6 +70,8 @@ describe('GitGraphProvider Diff Logic', () => {
   const createMockWebviewView = (messageListenerRef: { current: any }) => {
     return {
       onDidDispose: jest.fn(),
+      onDidChangeVisibility: jest.fn(() => ({ dispose: jest.fn() })),
+      visible: true,
       webview: {
         onDidReceiveMessage: (listener: any) => { messageListenerRef.current = listener; },
         html: '',
@@ -376,6 +379,58 @@ describe('GitGraphProvider Diff Logic', () => {
       jest.advanceTimersByTime(300);
       await Promise.resolve();
       expect(gitHelper.traceFileHistory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refresh and visibility handling', () => {
+    it('should refresh with silent flag when triggered', () => {
+      const listenerRef = { current: null };
+      const postMessage = jest.fn();
+      const mockWebview = createMockWebviewView(listenerRef);
+      mockWebview.webview.postMessage = postMessage;
+
+      provider.resolveWebviewView(mockWebview);
+      (listenerRef.current as any)({ command: 'ready' });
+
+      provider.refresh(true);
+      expect(postMessage).toHaveBeenCalledWith({ type: 'refresh', silent: true });
+    });
+
+    it('should queue refresh when hidden and execute upon becoming visible', () => {
+      const listenerRef = { current: null };
+      const postMessage = jest.fn();
+      let visibilityListener: Function | undefined;
+      const mockWebview = {
+        onDidDispose: jest.fn(),
+        onDidChangeVisibility: jest.fn((cb: Function) => {
+          visibilityListener = cb;
+          return { dispose: jest.fn() };
+        }),
+        visible: false,
+        webview: {
+          onDidReceiveMessage: (listener: any) => { listenerRef.current = listener; },
+          html: '',
+          options: {},
+          postMessage,
+          asWebviewUri: jest.fn(uri => uri)
+        }
+      };
+
+      provider.resolveWebviewView(mockWebview);
+      (listenerRef.current as any)({ command: 'ready' });
+
+      // Refresh while hidden
+      provider.refresh(true);
+      expect(postMessage).not.toHaveBeenCalledWith({ type: 'refresh', silent: true });
+      expect((provider as any)._needsRefreshOnVisible).toBe(true);
+
+      // Now become visible
+      mockWebview.visible = true;
+      expect(visibilityListener).toBeDefined();
+      visibilityListener!();
+
+      expect((provider as any)._needsRefreshOnVisible).toBe(false);
+      expect(postMessage).toHaveBeenCalledWith({ type: 'refresh', silent: true });
     });
   });
 });

@@ -5,7 +5,7 @@ import { updateFilterControls, updateSelectWidths } from './filters';
 import { renderTableAndGraph } from './graphLayout';
 import { renderFileHistory } from './fileHistory';
 import { constants } from './constants';
-import { renderCommitDetail, focusAndHighlightCommit } from './commitDetail';
+import { renderCommitDetail, focusAndHighlightCommit, collapseDetail } from './commitDetail';
 import { renderSelectionHistory } from './selectionHistory';
 import { renderFileBlameStats } from './roseChart';
 import { setRightPaneVisible, setRightPaneStateByNumber, setRightPane } from './rightPane';
@@ -21,7 +21,7 @@ export function initMessageHandler() {
   
     switch (message.type) {
       case 'refresh':
-        reloadData();
+        reloadData({ silent: !!message.silent });
         break;
       case 'hideLoading':
         hideLoading();
@@ -78,6 +78,13 @@ export function initMessageHandler() {
           state.commits = newCommits;
           const realCount = newCommits.filter((c: any) => c.hash !== '*working-tree*').length;
           state.hasMoreCommits = realCount >= state.pageSize;
+
+          if (state.selectedCommitHash && !newCommits.some((c: any) => c.hash === state.selectedCommitHash)) {
+            state.selectedCommitHash = null;
+            if (state.rightPaneState === RightPaneState.COMMIT) {
+              collapseDetail();
+            }
+          }
         } else {
           state.commits = state.commits.concat(newCommits);
           state.hasMoreCommits = newCommits.length === state.pageSize;

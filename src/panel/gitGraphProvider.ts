@@ -27,6 +27,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _lastFileHistoryPath?: string;
   private _repoDisposables: vscode.Disposable[] = [];
   private _isWebviewReady = false;
+  private _needsRefreshOnVisible = false;
   private _messageQueue: any[] = [];
 
   private _postMessage(message: any) {
@@ -110,6 +111,31 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         this._onActiveEditorChanged();
       })
     );
+
+    // Listen for repo Git state changes (stage, commit, branch, working tree, etc.)
+    if (typeof this._repoManager.onDidChangeGitState === 'function') {
+      this._repoDisposables.push(
+        this._repoManager.onDidChangeGitState((changedRoot) => {
+          const currentRoot = this._repoManager.getSelectedRoot();
+          if (!changedRoot || !currentRoot || changedRoot === currentRoot) {
+            this._triggerDebouncedRefresh();
+          }
+        })
+      );
+    }
+
+    // Listen for webview visibility changes (switching tabs or unfolding panel)
+    if (typeof webviewView.onDidChangeVisibility === 'function') {
+      this._repoDisposables.push(
+        webviewView.onDidChangeVisibility(() => {
+          if (webviewView.visible && this._needsRefreshOnVisible) {
+            this._needsRefreshOnVisible = false;
+            clearGitCache();
+            this.refresh(true);
+          }
+        })
+      );
+    }
 
     webviewView.webview.onDidReceiveMessage(async (data) => {
       // Handle repo management commands first (no git root needed)
@@ -490,9 +516,11 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     return html;
   }
 
-  public refresh() {
+  public refresh(silent = false) {
     if (this._view && this._view.visible) {
-      this._postMessage({ type: 'refresh' });
+      this._postMessage({ type: 'refresh', silent });
+    } else {
+      this._needsRefreshOnVisible = true;
     }
   }
 
@@ -707,7 +735,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
       }
       console.log('[Git 可视化] Git change detected, refreshing graph...');
       clearGitCache();
-      this.refresh();
+      this.refresh(true);
     }, 300);
   }
 

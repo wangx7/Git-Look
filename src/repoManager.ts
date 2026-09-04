@@ -26,11 +26,15 @@ export class RepoManager implements vscode.Disposable {
 
   private readonly _onDidChangeRepos = new vscode.EventEmitter<void>();
   private readonly _onDidChangeSelection = new vscode.EventEmitter<void>();
+  private readonly _onDidChangeGitState = new vscode.EventEmitter<string>();
+  private _repoStateListeners: Map<string, vscode.Disposable> = new Map();
 
   /** Fired when the repo list changes (repos added/removed/discovered). */
   public readonly onDidChangeRepos = this._onDidChangeRepos.event;
   /** Fired when the selected repo index changes. */
   public readonly onDidChangeSelection = this._onDidChangeSelection.event;
+  /** Fired when a repository's Git state changes (stage, commit, branch, working tree, etc.). */
+  public readonly onDidChangeGitState = this._onDidChangeGitState.event;
 
   /** Initialise the manager — call once during extension activation. */
   async init(): Promise<void> {
@@ -47,11 +51,18 @@ export class RepoManager implements vscode.Disposable {
 
         if (this._gitApi) {
           if (typeof this._gitApi.onDidOpenRepository === 'function') {
-            this._disposables.push(this._gitApi.onDidOpenRepository(() => this._refresh()));
+            this._disposables.push(this._gitApi.onDidOpenRepository(() => {
+              this._updateGitStateListeners();
+              this._refresh();
+            }));
           }
           if (typeof this._gitApi.onDidCloseRepository === 'function') {
-            this._disposables.push(this._gitApi.onDidCloseRepository(() => this._refresh()));
+            this._disposables.push(this._gitApi.onDidCloseRepository(() => {
+              this._updateGitStateListeners();
+              this._refresh();
+            }));
           }
+          this._updateGitStateListeners();
         }
       }
     } catch (e) {
@@ -97,12 +108,39 @@ export class RepoManager implements vscode.Disposable {
       this._selectedIndex = 0;
     }
 
+    // Update git state listeners for all discovered repos
+    this._updateGitStateListeners();
+
     // Notify if anything changed
     const newRoots = this._repos.map(r => r.root);
     const changed = oldRoots.length !== newRoots.length ||
       oldRoots.some((r, i) => r !== newRoots[i]);
     if (changed) {
       this._onDidChangeRepos.fire();
+    }
+  }
+
+  private _updateGitStateListeners(): void {
+    const currentRoots = new Set<string>();
+    if (this._gitApi?.repositories) {
+      for (const repo of this._gitApi.repositories) {
+        const root = repo.rootUri?.fsPath;
+        if (!root) continue;
+        currentRoots.add(root);
+        if (!this._repoStateListeners.has(root) && repo.state && typeof repo.state.onDidChange === 'function') {
+          const disposable = repo.state.onDidChange(() => {
+            this._onDidChangeGitState.fire(root);
+          });
+          this._repoStateListeners.set(root, disposable);
+        }
+      }
+    }
+    // Clean up listeners for repositories that are no longer present
+    for (const [root, disposable] of this._repoStateListeners.entries()) {
+      if (!currentRoots.has(root)) {
+        try { disposable.dispose(); } catch { /* ignore */ }
+        this._repoStateListeners.delete(root);
+      }
     }
   }
 
@@ -191,7 +229,12 @@ export class RepoManager implements vscode.Disposable {
       try { d.dispose(); } catch { /* ignore */ }
     });
     this._disposables = [];
+    this._repoStateListeners.forEach(d => {
+      try { d.dispose(); } catch { /* ignore */ }
+    });
+    this._repoStateListeners.clear();
     this._onDidChangeRepos.dispose();
     this._onDidChangeSelection.dispose();
+    this._onDidChangeGitState.dispose();
   }
 }

@@ -248,6 +248,43 @@ describe('RepoManager', () => {
     });
   });
 
+  describe('onDidChangeGitState', () => {
+    it('should fire onDidChangeGitState when repo.state.onDidChange triggers', async () => {
+      let stateListener: Function | undefined;
+      const mockRepo = {
+        rootUri: { fsPath: '/workspace/repo1' },
+        state: {
+          onDidChange: jest.fn((cb: Function) => {
+            stateListener = cb;
+            return { dispose: jest.fn() };
+          })
+        }
+      };
+
+      (vscode.extensions.getExtension as jest.Mock).mockReturnValue({
+        isActive: true,
+        exports: {
+          getAPI: () => ({
+            repositories: [mockRepo],
+            onDidOpenRepository: () => ({ dispose: jest.fn() }),
+            onDidCloseRepository: () => ({ dispose: jest.fn() })
+          })
+        }
+      });
+      (vscode.workspace.getWorkspaceFolder as jest.Mock).mockReturnValue({ name: 'repo1' });
+
+      const gitStateSpy = jest.fn();
+      manager.onDidChangeGitState(gitStateSpy);
+
+      await manager.init();
+      expect(mockRepo.state.onDidChange).toHaveBeenCalled();
+      expect(stateListener).toBeDefined();
+
+      stateListener!();
+      expect(gitStateSpy).toHaveBeenCalledWith('/workspace/repo1');
+    });
+  });
+
   // ── Helpers ────────────────────────────────────────
   function setupTwoRepos() {
     const mockRepo1 = { rootUri: { fsPath: '/workspace/repo1' } };

@@ -17,18 +17,23 @@ export function hideLoading() {
   elements.loadingOverlay.classList.add('hidden');
 }
 
-export function reloadData(forceExpandOverview = false) {
+export function reloadData(options: { forceExpandOverview?: boolean; silent?: boolean } | boolean = false) {
+  const forceExpandOverview = typeof options === 'boolean' ? options : !!options.forceExpandOverview;
+  const silent = typeof options === 'boolean' ? false : !!options.silent;
+
   state.currentPage = 0;
   state.hasMoreCommits = true;
-  state.commits = [];
-  state.selectedCommitHash = null;
-  state.currentFocusedAuthor = null;
-  window._pendingForceExpand = forceExpandOverview;
-  if (forceExpandOverview || state.rightPaneState === RightPaneState.LOADING) {
-    setRightPane(RightPaneState.LOADING);
+  if (!silent) {
+    state.commits = [];
+    state.selectedCommitHash = null;
+    state.currentFocusedAuthor = null;
+    window._pendingForceExpand = forceExpandOverview;
+    if (forceExpandOverview || state.rightPaneState === RightPaneState.LOADING) {
+      setRightPane(RightPaneState.LOADING);
+    }
+    showLoading();
   }
   state.isFetching = true;
-  showLoading();
   elements.errorBanner.classList.add('hidden');
 
   const filters = getFilters();
