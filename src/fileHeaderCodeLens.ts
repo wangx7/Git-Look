@@ -153,7 +153,22 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
         return [];
       }
 
-      const isNewFile = !isTracked && fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
+      let isNewFile = false;
+      if (!isTracked) {
+        try {
+          if (typeof vscode.workspace?.fs?.stat === 'function') {
+            const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+            isNewFile = stat.size > 0;
+          } else if (fs.promises && typeof fs.promises.stat === 'function') {
+            const stat = await fs.promises.stat(filePath);
+            isNewFile = stat.size > 0;
+          } else if (typeof fs.existsSync === 'function' && fs.existsSync(filePath)) {
+            isNewFile = fs.statSync(filePath).size > 0;
+          }
+        } catch {
+          isNewFile = false;
+        }
+      }
       const nowSeconds = Math.floor(Date.now() / 1000);
 
       const headerData = buildFileHeaderData(

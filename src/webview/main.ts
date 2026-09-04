@@ -5,7 +5,7 @@ import { setRightPaneVisible, setRightPane, updateDetailsCollapseUI, onRightPane
 import { initFilters, updateFilterControls, getFilters, adjustSelectWidth } from './filters';
 import { reloadData, requestStats, saveCurrentState, loadNextPage } from './dataLoader';
 import { renderTableAndGraph } from './graphLayout';
-import { updateVirtualList } from './virtualList';
+import { updateVirtualList, initVirtualListEvents } from './virtualList';
 import { handleRowClick, onRequestVirtualListUpdate } from './commitDetail';
 import { initLayout } from './layout';
 import { initMessageHandler } from './messageHandler';
@@ -22,6 +22,9 @@ const vscode = window.vscode;
 function init() {
   // Request repo list from extension host
   vscode.postMessage({ command: 'getRepos' });
+
+  // Initialize unified virtual list event delegation
+  initVirtualListEvents();
 
   // Init layout and event listeners
   initLayout();

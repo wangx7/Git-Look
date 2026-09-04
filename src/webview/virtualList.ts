@@ -1,6 +1,6 @@
 import { state } from './state';
 import { elements } from './dom';
-import { colors, formatDate, formatCommitDate, escapeHtml, hexToRgba } from './utils/format';
+import { colors, formatCommitDate, escapeHtml, hexToRgba } from './utils/format';
 import { constants } from './constants';
 import { drawSvg, selectCircleInGraph, highlightLane, clearLaneHighlight } from './svgRenderer';
 import { renderInlineBadges } from './badgeRenderer';
@@ -74,7 +74,6 @@ export function renderVisibleRows(startIndex, endIndex) {
       tr.style.setProperty('--row-selected-glow-bg', hexToRgba(color, 0.08));
     }
 
-    const absTime = formatDate(c.timestamp);
     const commitDate = formatCommitDate(c.timestamp);
     const decsHtml = renderInlineBadges(c);
 
@@ -82,38 +81,13 @@ export function renderVisibleRows(startIndex, endIndex) {
         <td class="graph-col" style="width: ${state.currentGraphWidth}px; min-width: ${state.currentGraphWidth}px;"></td>
         <td class="content-col">
           <div class="row-content">
-            <span class="commit-message" title="${escapeHtml(c.message)}">${escapeHtml(c.message)}</span>
+            <span class="commit-message">${escapeHtml(c.message)}</span>
             ${decsHtml ? `<span class="commit-badges">${decsHtml}</span>` : ''}
-            <span class="commit-author-inline" title="${escapeHtml(c.author)}">${escapeHtml(c.author)}</span>
-            <span class="commit-date-inline" title="${absTime}">${commitDate}</span>
+            <span class="commit-author-inline">${escapeHtml(c.author)}</span>
+            <span class="commit-date-inline">${commitDate}</span>
           </div>
         </td>
       `;
-
-    tr.addEventListener('mouseenter', () => {
-      const node = state.cachedCommitNodes[c.hash];
-      if (node) {
-        highlightLane(node.colorIdx);
-      }
-      const el = elements.graphSvg.querySelector(`.node-${c.hash}`);
-      if (el) {
-        el.classList.add('hovered');
-        if (el.parentNode && el.parentNode.tagName === 'g') {
-          el.parentNode.querySelectorAll('circle').forEach(cc => cc.classList.add('hovered'));
-        }
-      }
-    });
-
-    tr.addEventListener('mouseleave', () => {
-      clearLaneHighlight();
-      const el = elements.graphSvg.querySelector(`.node-${c.hash}`);
-      if (el) {
-        el.classList.remove('hovered');
-        if (el.parentNode && el.parentNode.tagName === 'g') {
-          el.parentNode.querySelectorAll('circle').forEach(cc => cc.classList.remove('hovered'));
-        }
-      }
-    });
 
     fragment.appendChild(tr);
   }
@@ -133,5 +107,68 @@ export function renderVisibleRows(startIndex, endIndex) {
 
   elements.commitsTbody.innerHTML = '';
   elements.commitsTbody.appendChild(fragment);
+}
+
+let currentHoveredHash: string | null = null;
+
+function clearRowHover(hash: string) {
+  clearLaneHighlight();
+  const el = elements.graphSvg?.querySelector(`.node-${hash}`);
+  if (el) {
+    el.classList.remove('hovered');
+    if (el.parentNode && el.parentNode.tagName === 'g') {
+      el.parentNode.querySelectorAll('circle').forEach(cc => cc.classList.remove('hovered'));
+    }
+  }
+}
+
+/**
+ * Unified event delegation on commitsTbody:
+ * Replaces per-row listener creation with a single pair of delegation handlers,
+ * eliminating GC churn and closure allocations during scrolling.
+ */
+export function initVirtualListEvents() {
+  if (!elements.commitsTbody) return;
+
+  elements.commitsTbody.addEventListener('mouseover', (e: MouseEvent) => {
+    const tr = (e.target as HTMLElement).closest('tr.commit-row') as HTMLElement | null;
+    if (!tr) return;
+    const hash = tr.dataset.hash;
+    if (!hash || hash === currentHoveredHash) return;
+
+    if (currentHoveredHash && currentHoveredHash !== hash) {
+      clearRowHover(currentHoveredHash);
+    }
+    currentHoveredHash = hash;
+
+    const node = state.cachedCommitNodes[hash];
+    if (node) {
+      highlightLane(node.colorIdx);
+    }
+    const el = elements.graphSvg?.querySelector(`.node-${hash}`);
+    if (el) {
+      el.classList.add('hovered');
+      if (el.parentNode && el.parentNode.tagName === 'g') {
+        el.parentNode.querySelectorAll('circle').forEach(cc => cc.classList.add('hovered'));
+      }
+    }
+  });
+
+  elements.commitsTbody.addEventListener('mouseout', (e: MouseEvent) => {
+    const tr = (e.target as HTMLElement).closest('tr.commit-row') as HTMLElement | null;
+    if (!tr) return;
+    const related = e.relatedTarget as Node | null;
+    if (related && tr.contains(related)) {
+      return;
+    }
+
+    const hash = tr.dataset.hash;
+    if (hash) {
+      clearRowHover(hash);
+      if (currentHoveredHash === hash) {
+        currentHoveredHash = null;
+      }
+    }
+  });
 }
 

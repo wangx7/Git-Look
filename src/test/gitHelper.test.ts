@@ -16,7 +16,9 @@ import {
   getAuthors,
   buildLogArgs,
   getWorkingTreeStatus,
-  getWorktrees
+  getWorktrees,
+  execGit,
+  execGitStream
 } from '../gitHelper';
 import * as cp from 'child_process';
 import * as vscode from 'vscode';
@@ -496,6 +498,52 @@ describe('gitHelper', () => {
       expect(worktrees[1].isCurrent).toBe(false);
       expect(worktrees[1].isLocked).toBe(true);
       expect(worktrees[1].lockReason).toBe('working on hotfix');
+    });
+  });
+
+  describe('execGit and execGitStream', () => {
+    it('execGit caches results with deterministic compound keys and avoids space collisions', async () => {
+      clearGitCache();
+      let callCount = 0;
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        callCount++;
+        cb(null, `result-${callCount}`, '');
+      });
+
+      const res1 = await execGit(['commit', '-m', 'hello world'], '/mock/repo');
+      const res2 = await execGit(['commit', '-m', 'hello world'], '/mock/repo');
+      expect(res1).toBe(res2);
+      expect(callCount).toBe(1);
+
+      const res3 = await execGit(['commit', '-m', 'hello', 'world'], '/mock/repo');
+      expect(callCount).toBe(2);
+      expect(res3).not.toBe(res1);
+    });
+
+    it('execGitStream streams lines chunk by chunk and supports early stopping', async () => {
+      const { EventEmitter } = require('events');
+      const mockChild: any = new EventEmitter();
+      mockChild.stdout = new EventEmitter();
+      mockChild.stderr = new EventEmitter();
+      mockChild.kill = jest.fn();
+
+      (cp.spawn as any).mockImplementation(() => mockChild);
+
+      const lines: string[] = [];
+      const streamPromise = execGitStream(['log'], '/mock/repo', (line) => {
+        lines.push(line);
+        if (lines.length >= 2) {
+          return false;
+        }
+      });
+
+      setImmediate(() => {
+        mockChild.stdout.emit('data', Buffer.from('line1\nline2\nline3\n'));
+      });
+
+      await streamPromise;
+      expect(lines).toEqual(['line1', 'line2']);
+      expect(mockChild.kill).toHaveBeenCalled();
     });
   });
 });

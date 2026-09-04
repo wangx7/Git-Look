@@ -42,16 +42,31 @@ export function showCommitTooltip(commit: any, anchorX: number, anchorY: number)
   const dateStr = formatDate(commit.timestamp);
   const relTime = getRelativeTime(commit.timestamp);
 
-  // Render all decoration badges, or fallback to inferred lane branch if available
-  let badgesHtml = '';
+  // Render all decoration badges, and append inferred lane branch if not already shown
+  const renderedBadges: string[] = [];
   if (commit.decorations && commit.decorations.length > 0) {
-    badgesHtml = commit.decorations.map((d: string) => makeBadgeHtml(d)).join('');
-  } else if (commit.hash) {
+    commit.decorations.forEach((d: string) => {
+      renderedBadges.push(makeBadgeHtml(d));
+    });
+  }
+
+  if (commit.hash) {
     const laneBranch = state.commitBranchLabel[commit.hash];
     if (laneBranch && laneBranch.name) {
-      badgesHtml = makeBadgeHtml(laneBranch.name, undefined, laneBranch.color);
+      const isAlreadyShown = commit.decorations && commit.decorations.some((d: string) => {
+        if (d === laneBranch.name) return true;
+        if (d.replace(/^origin\//, '') === laneBranch.name) return true;
+        if (d.replace(/^refs\/remotes\/[^/]+\//, '') === laneBranch.name) return true;
+        return false;
+      });
+
+      if (!isAlreadyShown) {
+        renderedBadges.push(makeBadgeHtml(laneBranch.name, undefined, laneBranch.color));
+      }
     }
   }
+
+  const badgesHtml = renderedBadges.join('');
 
   popover.innerHTML = `
     <div class="popover-header">

@@ -99,4 +99,24 @@ describe('commitTooltip', () => {
     expect(containerMock.addEventListener).toHaveBeenCalledWith('scroll', expect.any(Function), { passive: true });
     expect(document.addEventListener).toHaveBeenCalledWith('click', expect.any(Function));
   });
+
+  it('renders inferred lane branch in tooltip when commit has no decorations', () => {
+    state.commitBranchLabel['hash93bba8e'] = {
+      name: 'fix/http-proxy-rc-version',
+      color: '#10b981'
+    };
+    const commit = {
+      hash: 'hash93bba8e',
+      parents: ['parent1'],
+      author: 'Yichen Jiang',
+      email: 'yj@example.com',
+      timestamp: 1600000000,
+      decorations: [],
+      message: 'fix(http-proxy): withhold NODE_USE_ENV_PROXY'
+    };
+
+    showCommitTooltip(commit, 100, 200);
+    expect(mockPopover.innerHTML).toContain('fix/http-proxy-rc-version');
+    expect(mockPopover.innerHTML).toContain('#10b981');
+  });
 });

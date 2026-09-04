@@ -9,11 +9,287 @@ import { requestStats, hideLoading, showLoading } from './dataLoader';
 
 import { updateVirtualList } from './virtualList';
 import { selectCircleInGraph } from './svgRenderer';
-
+import { MinHeap } from '../utils/minHeap';
 
 const rowHeight = constants.rowHeight;
 const laneWidth = constants.laneWidth;
 const paddingLeft = constants.paddingLeft;
+
+/**
+ * FreeLanePool manages available lane slots using a binary MinHeap.
+ * It implements greedy interval graph coloring on DAG, always recycling
+ * the lowest available lane index in O(log K) time to keep graph width minimal.
+ */
+export class FreeLanePool {
+  private minHeap: MinHeap<number>;
+  private pooled: Set<number>;
+
+  constructor() {
+    this.minHeap = new MinHeap<number>((a, b) => a - b);
+    this.pooled = new Set<number>();
+  }
+
+  public release(laneIdx: number): void {
+    if (laneIdx > 0 && !this.pooled.has(laneIdx)) {
+      this.pooled.add(laneIdx);
+      this.minHeap.push(laneIdx);
+    }
+  }
+
+  public acquire(lanes: (string | null)[], preferZero = false): number {
+    if (preferZero && (lanes.length === 0 || lanes[0] === null)) {
+      if (lanes.length === 0) lanes.push(null);
+      return 0;
+    }
+    if (lanes.length === 0) {
+      lanes.push(null); // lane 0 is reserved for main trunk
+    }
+
+    while (!this.minHeap.isEmpty) {
+      const minLane = this.minHeap.pop()!;
+      this.pooled.delete(minLane);
+      if (minLane < lanes.length && lanes[minLane] === null) {
+        return minLane;
+      }
+    }
+
+    for (let i = 1; i < lanes.length; i++) {
+      if (lanes[i] === null) {
+        return i;
+      }
+    }
+
+    const idx = lanes.length;
+    lanes.push(null);
+    return idx;
+  }
+
+  public clear(): void {
+    this.minHeap.clear();
+    this.pooled.clear();
+  }
+}
+
+export interface MergeBranchInfo {
+  sourceBranch?: string; // the branch that was merged in (parents[1])
+  targetBranch?: string; // the branch that was merged into (parents[0])
+}
+
+/**
+ * Extract source and target branch names from Git merge commit messages.
+ * Handles GitHub/GitLab PRs, standard branch merges, and remote-tracking merges.
+ */
+export function parseMergeMessage(message: string): MergeBranchInfo | null {
+  if (!message) return null;
+  const firstLine = message.split('\n')[0].trim();
+
+  // 1. "Merge pull request #3481 from deepseek-harness/fix/http-proxy-rc-version"
+  const prMatch = firstLine.match(/Merge pull request #\d+ from ([^\s\n]+)(?:\s+into\s+([^\s\n]+))?/i);
+  if (prMatch) {
+    let src = prMatch[1].trim();
+    // Clean fork repo prefix if present (e.g. "deepseek-harness/fix/xxx" -> "fix/xxx")
+    const slashIdx = src.indexOf('/');
+    if (slashIdx !== -1) {
+      const remainder = src.substring(slashIdx + 1);
+      if (remainder.includes('/') || remainder.startsWith('fix') || remainder.startsWith('feature') || remainder.startsWith('worktree') || remainder.startsWith('hotfix')) {
+        src = remainder;
+      }
+    }
+    return {
+      sourceBranch: src,
+      targetBranch: prMatch[2] ? prMatch[2].trim() : undefined
+    };
+  }
+
+  // 2. "Merge remote-tracking branch 'origin/xxx' into yyy" or "Merge remote-tracking branch 'origin/xxx'"
+  const remoteMatch = firstLine.match(/Merge remote-tracking branch ['"]?([^'"\s]+)['"]?(?:\s+into\s+['"]?([^'"\s]+)['"]?)?/i);
+  if (remoteMatch) {
+    const src = remoteMatch[1].replace(/^[^\/]+\//, '').trim();
+    const tgt = remoteMatch[2] ? remoteMatch[2].replace(/^['"]/, '').replace(/['"]$/, '').trim() : undefined;
+    return { sourceBranch: src, targetBranch: tgt };
+  }
+
+  // 3. "Merge branch 'xxx' into yyy" or "Merge branch 'xxx'"
+  const branchMatch = firstLine.match(/Merge branch ['"]?([^'"\s]+)['"]?(?:\s+into\s+['"]?([^'"\s]+)['"]?)?/i);
+  if (branchMatch) {
+    const src = branchMatch[1].trim();
+    const tgt = branchMatch[2] ? branchMatch[2].trim() : undefined;
+    return { sourceBranch: src, targetBranch: tgt };
+  }
+
+  // 4. "Merge xxx into yyy"
+  const intoMatch = firstLine.match(/Merge\s+['"]?([^'"\s]+)['"]?\s+into\s+['"]?([^'"\s]+)['"]?/i);
+  if (intoMatch && intoMatch[1] !== 'pull' && intoMatch[1] !== 'remote-tracking' && intoMatch[1] !== 'branch') {
+    return {
+      sourceBranch: intoMatch[1].trim(),
+      targetBranch: intoMatch[2].trim()
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Extract clean branch name from decoration array.
+ */
+export function extractBranchFromDecorations(decorations: string[] | undefined, remoteBranches: string[] = []): string | null {
+  if (!decorations || decorations.length === 0) return null;
+
+  // 1. Prefer local branch
+  const localBranch = decorations.find(d =>
+    d !== 'HEAD' &&
+    !d.startsWith('HEAD ->') &&
+    !d.startsWith('origin/') &&
+    !d.startsWith('refs/remotes/') &&
+    !d.startsWith('tag: ') &&
+    !remoteBranches.includes(d)
+  );
+  if (localBranch) {
+    return localBranch;
+  }
+
+  // 2. Local branch in HEAD pointer: "HEAD -> main"
+  const headPtr = decorations.find(d => d.startsWith('HEAD -> '));
+  if (headPtr) {
+    return headPtr.substring(8).trim();
+  }
+
+  // 3. Remote branch: "origin/feat-1" or in remoteBranches
+  const remoteDec = decorations.find(d =>
+    d.startsWith('origin/') || d.startsWith('refs/remotes/') || remoteBranches.includes(d)
+  );
+  if (remoteDec) {
+    return remoteDec.replace(/^origin\//, '').replace(/^refs\/remotes\/[^\/]+\//, '');
+  }
+
+  return null;
+}
+
+/**
+ * Infer the branch name for every commit in the graph using:
+ * 1. Explicit commit decorations (local & remote branch pointers)
+ * 2. Merge commit message semantic parsing (PR # / merge into)
+ * 3. Topological downward DAG propagation along parent lanes
+ * 4. Trunk anchoring for main/master line
+ */
+export function inferCommitBranches(
+  commits: any[],
+  commitNodes: Record<string, any>,
+  lines: any[],
+  hashToCommitMap: Map<string, any>,
+  mainTrunk: Set<string>,
+  remoteBranches: string[]
+): Record<string, { name: string | null; color: string }> {
+  const commitToBranch = new Map<string, string>();
+
+  // 1. Identify trunk branch name (e.g. 'main' or 'master')
+  let trunkBranchName = 'main';
+  for (const c of commits) {
+    if (mainTrunk.has(c.hash)) {
+      const decBranch = extractBranchFromDecorations(c.decorations, remoteBranches);
+      if (decBranch) {
+        trunkBranchName = decBranch;
+        break;
+      }
+    }
+  }
+
+  // 2. First pass: Seed known branches from direct decorations and explicit merge messages
+  commits.forEach(c => {
+    if (c.hash === '*working-tree*') {
+      commitToBranch.set(c.hash, trunkBranchName);
+      return;
+    }
+
+    const decBranch = extractBranchFromDecorations(c.decorations, remoteBranches);
+    if (decBranch) {
+      commitToBranch.set(c.hash, decBranch);
+    }
+
+    if (c.parents && c.parents.length >= 2) {
+      const mergeInfo = parseMergeMessage(c.message);
+      if (mergeInfo) {
+        if (mergeInfo.sourceBranch && !commitToBranch.has(c.parents[1])) {
+          commitToBranch.set(c.parents[1], mergeInfo.sourceBranch);
+        }
+        if (mergeInfo.targetBranch && !commitToBranch.has(c.parents[0])) {
+          commitToBranch.set(c.parents[0], mergeInfo.targetBranch);
+        }
+      }
+    }
+  });
+
+  // 3. Second pass: Downward DAG propagation along parent edges
+  const laneCurrentBranch = new Map<number, string>();
+
+  for (let r = 0; r < commits.length; r++) {
+    const c = commits[r];
+    const hash = c.hash;
+    const node = commitNodes[hash];
+    const lane = node ? node.lane : undefined;
+
+    let branch = commitToBranch.get(hash);
+
+    if (!branch && mainTrunk.has(hash)) {
+      branch = trunkBranchName;
+      commitToBranch.set(hash, branch);
+    }
+
+    if (!branch && lane !== undefined && laneCurrentBranch.has(lane)) {
+      branch = laneCurrentBranch.get(lane);
+      commitToBranch.set(hash, branch!);
+    }
+
+    if (branch && lane !== undefined) {
+      laneCurrentBranch.set(lane, branch);
+    }
+
+    const parents = c.parents || [];
+    if (parents.length === 1) {
+      const p0 = parents[0];
+      if (branch && !commitToBranch.has(p0)) {
+        const cIsTrunk = mainTrunk.has(hash);
+        const p0IsTrunk = mainTrunk.has(p0);
+        if (!cIsTrunk && !p0IsTrunk) {
+          commitToBranch.set(p0, branch);
+        } else if (cIsTrunk && p0IsTrunk) {
+          commitToBranch.set(p0, trunkBranchName);
+        }
+      }
+    } else if (parents.length >= 2) {
+      const p0 = parents[0];
+      const p1 = parents[1];
+
+      if (branch && !commitToBranch.has(p0)) {
+        commitToBranch.set(p0, branch);
+      }
+
+      const mergeInfo = parseMergeMessage(c.message);
+      const secondaryBranch = mergeInfo?.sourceBranch || commitToBranch.get(p1);
+      if (secondaryBranch) {
+        commitToBranch.set(p1, secondaryBranch);
+        const p1Node = commitNodes[p1];
+        if (p1Node && p1Node.lane !== undefined) {
+          laneCurrentBranch.set(p1Node.lane, secondaryBranch);
+        }
+      }
+    }
+  }
+
+  // 4. Build final result mapping
+  const result: Record<string, { name: string | null; color: string }> = {};
+  commits.forEach(c => {
+    const node = commitNodes[c.hash];
+    const laneColor = node ? colors[node.colorIdx % colors.length] : colors[0];
+    const branchName = commitToBranch.get(c.hash) || null;
+    result[c.hash] = {
+      name: branchName,
+      color: laneColor
+    };
+  });
+
+  return result;
+}
 
 export function renderTableAndGraph() {
   const oldSelectedHash = state.selectedCommitHash;
@@ -52,36 +328,14 @@ export function renderTableAndGraph() {
     hashToCommitRowMap.set(c.hash, index);
   });
 
-  const lanes = [];             // lanes[i] = hash or null (activeLanes)
-  const commitNodes = {};       // hash → { row, lane, isMerge }
-  const lines = [];             // 连线数据
+  const lanes: (string | null)[] = [];             // lanes[i] = hash or null (activeLanes)
+  const commitNodes: Record<string, any> = {};       // hash → { row, lane, isMerge }
+  const lines: any[] = [];             // 连线数据
   let maxLanes = 0;
-
-  // Helper to find first null slot or push a new one
-  function getEmptyLaneIndex(preferZero = false) {
-    if (preferZero && lanes[0] === null) {
-      return 0;
-    }
-    const start = preferZero ? 0 : 1;
-    for (let i = start; i < lanes.length; i++) {
-      if (lanes[i] === null) {
-        return i;
-      }
-    }
-    if (preferZero && lanes.length === 0) {
-      lanes.push(null); // lane 0
-      return 0;
-    }
-    if (lanes.length === 0) {
-      lanes.push(null); // lane 0
-    }
-    const idx = lanes.length;
-    lanes.push(null);
-    return idx;
-  }
+  const freeLanePool = new FreeLanePool();
 
   // Determine if a commit is main trunk
-  const mainTrunk = new Set();
+  const mainTrunk = new Set<string>();
   let curr: string | null = null;
   if (state.commits[0] && state.commits[0].hash === '*working-tree*') {
     curr = state.commits[0].hash;
@@ -120,7 +374,7 @@ export function renderTableAndGraph() {
         }
         laneColorIndices[0] = 0;
       } else {
-        laneIdx = getEmptyLaneIndex(false);
+        laneIdx = freeLanePool.acquire(lanes, false);
         lanes[laneIdx] = hash;
         laneColorIndices[laneIdx] = nextColorIdx++;
       }
@@ -152,6 +406,9 @@ export function renderTableAndGraph() {
     for (let i = 0; i < lanes.length; i++) {
       if (lanes[i] === hash) {
         lanes[i] = null;
+        if (i > 0) {
+          freeLanePool.release(i);
+        }
       }
     }
 
@@ -225,7 +482,7 @@ export function renderTableAndGraph() {
             if (otherBranchChildLaneIdx !== -1) {
               targetLaneIdx = otherBranchChildLaneIdx;
             } else {
-              targetLaneIdx = getEmptyLaneIndex(false);
+              targetLaneIdx = freeLanePool.acquire(lanes, false);
               lanes[targetLaneIdx] = pk;
               laneColorIndices[targetLaneIdx] = nextColorIdx++;
             }
@@ -248,7 +505,7 @@ export function renderTableAndGraph() {
           if (shouldDrawToBottom) {
             let targetLaneIdx = lanes.indexOf(pk);
             if (targetLaneIdx === -1) {
-              targetLaneIdx = getEmptyLaneIndex(false);
+              targetLaneIdx = freeLanePool.acquire(lanes, false);
               lanes[targetLaneIdx] = pk;
               laneColorIndices[targetLaneIdx] = nextColorIdx++;
             }
@@ -278,51 +535,15 @@ export function renderTableAndGraph() {
   state.cachedLines = lines;
   state.cachedCommitNodes = commitNodes;
 
-  // Build commit → branch name mapping
-  const laneCurrentBranch = {};
-  state.commitBranchLabel = {};
-  state.commits.forEach(c => {
-    const node = commitNodes[c.hash];
-    if (!node) return;
-    const lane = node.lane;
-    const laneColor = colors[node.colorIdx % colors.length];
-
-    let resolvedBranch = null;
-    if (c.decorations && c.decorations.length > 0) {
-      resolvedBranch = c.decorations.find(d =>
-        d !== 'HEAD' &&
-        !d.startsWith('origin/') &&
-        !d.startsWith('tag: ') &&
-        !state.remoteBranches.includes(d)
-      );
-
-      if (!resolvedBranch && c.decorations[0] === 'HEAD') {
-        resolvedBranch = c.decorations.find(d =>
-          d !== 'HEAD' &&
-          !d.startsWith('origin/') &&
-          !d.startsWith('tag: ')
-        );
-      }
-
-      if (!resolvedBranch) {
-        const remoteDec = c.decorations.find(d =>
-          d.startsWith('origin/') || state.remoteBranches.includes(d)
-        );
-        if (remoteDec) {
-          resolvedBranch = remoteDec.replace(/^origin\//, '');
-        }
-      }
-    }
-
-    if (resolvedBranch) {
-      laneCurrentBranch[lane] = { name: resolvedBranch, color: laneColor };
-    }
-
-    const branchLabel = laneCurrentBranch[lane] || null;
-    state.commitBranchLabel[c.hash] = branchLabel
-      ? { name: branchLabel.name, color: laneColor }
-      : { name: null, color: laneColor };
-  });
+  // Build commit → branch name mapping using DAG topological propagation & merge message parsing
+  state.commitBranchLabel = inferCommitBranches(
+    state.commits,
+    commitNodes,
+    lines,
+    hashToCommitMap,
+    mainTrunk,
+    state.remoteBranches
+  );
 
   // Calculate max lane for each row
   const rowMaxLanes = new Array(state.commits.length).fill(0);
