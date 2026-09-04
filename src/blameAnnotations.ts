@@ -107,14 +107,25 @@ export class BlameAnnotationsManager implements vscode.Disposable {
     }
   }
 
+  private currentHighlightColor: string | null = null;
+
   public highlightCommitLines(editor: vscode.TextEditor, hash: string, color: string) {
-    this.clearHighlight(editor);
-    if (!this.enabled || !hash) return;
+    if (!this.enabled || !hash) {
+      this.clearHighlight(editor);
+      return;
+    }
     
-    this.currentHighlightDeco = vscode.window.createTextEditorDecorationType({
-      backgroundColor: color,
-      isWholeLine: true
-    });
+    if (!this.currentHighlightDeco || this.currentHighlightColor !== color) {
+      if (this.currentHighlightDeco) {
+        try { editor.setDecorations(this.currentHighlightDeco, []); } catch { /* ignore */ }
+        this.currentHighlightDeco.dispose();
+      }
+      this.currentHighlightColor = color;
+      this.currentHighlightDeco = vscode.window.createTextEditorDecorationType({
+        backgroundColor: color,
+        isWholeLine: true
+      });
+    }
     
     const ranges: vscode.Range[] = [];
     for (let i = 0; i < this.lineHashMapping.length; i++) {
@@ -132,11 +143,7 @@ export class BlameAnnotationsManager implements vscode.Disposable {
 
   public clearHighlight(editor: vscode.TextEditor) {
     if (this.currentHighlightDeco) {
-      // Explicitly clear decorations before disposing. Although dispose() removes decorations
-      // automatically, doing it explicitly is safer in multi-editor scenarios.
       try { editor.setDecorations(this.currentHighlightDeco, []); } catch { /* editor may be closed */ }
-      this.currentHighlightDeco.dispose();
-      this.currentHighlightDeco = null;
     }
   }
 
@@ -316,6 +323,11 @@ export class BlameAnnotationsManager implements vscode.Disposable {
       }
     }
     this.gitGraphProvider.clearFileBlameStats();
+    if (this.currentHighlightDeco) {
+      this.currentHighlightDeco.dispose();
+      this.currentHighlightDeco = null;
+      this.currentHighlightColor = null;
+    }
     this.decorationType.dispose();
     this.disposables.forEach(d => d.dispose());
     this.disposables = [];

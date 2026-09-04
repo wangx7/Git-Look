@@ -25,11 +25,6 @@ export function updateVirtualList() {
 
   renderVisibleRows(startIndex, endIndex);
   drawSvg(startIndex, endIndex);
-
-  // Make sure the selected node stays highlighted after a virtual draw
-  if (state.selectedCommitHash) {
-    selectCircleInGraph(state.selectedCommitHash);
-  }
 }
 
 export function renderVisibleRows(startIndex, endIndex) {
@@ -63,6 +58,9 @@ export function renderVisibleRows(startIndex, endIndex) {
     if (!c) continue;
     const tr = document.createElement('tr');
     tr.className = 'commit-row';
+    if (c.hash === '*working-tree*') {
+      tr.className += ' working-tree-row';
+    }
     if (c.hash === state.selectedCommitHash) {
       tr.className += ' selected';
     }

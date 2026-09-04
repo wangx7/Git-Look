@@ -268,6 +268,16 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Register Toggle File Header CodeLens command
+  const toggleFileHeaderCommand = vscode.commands.registerCommand('git-visual.toggleFileHeaderCodeLens', async () => {
+    const config = vscode.workspace.getConfiguration('git-visual');
+    const current = config.get<boolean>('showFileHeaderCodeLens', true);
+    await config.update('showFileHeaderCodeLens', !current, vscode.ConfigurationTarget.Global);
+    fileHeaderProvider.refresh();
+    vscode.window.setStatusBarMessage(`Git 文件头部信息已${!current ? '开启' : '关闭'}`, 2500);
+  });
+  context.subscriptions.push(toggleFileHeaderCommand);
+
   // Register Open File Recent Diff command
   const openFileRecentDiffCommand = vscode.commands.registerCommand('git-visual.openFileRecentDiff', async (filePath: string, diffKind: 'workingTree' | 'commit', hash?: string, isNewFile?: boolean) => {
     if (!filePath || isNewFile) {

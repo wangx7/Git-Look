@@ -22,6 +22,7 @@ const ICONS = {
  * 5. Special remote refs (e.g. origin/HEAD)
  */
 function getRefPriority(ref: string): number {
+  if (ref === 'Working Tree') return 0;
   if (ref.startsWith('HEAD')) return 1;
   if (!ref.startsWith('tag: ') && !ref.startsWith('origin/') && !state.remoteBranches.includes(ref)) return 2;
   if (ref.startsWith('tag: ')) return 3;
@@ -30,9 +31,15 @@ function getRefPriority(ref: string): number {
 }
 
 /**
- * Generate HTML for a single ref badge (branch/tag/HEAD/remote).
+ * Generate HTML for a single ref badge (branch/tag/HEAD/remote/worktree).
  */
 export function makeBadgeHtml(dec: string, overrideLabel?: string, overrideColor?: string): string {
+  if (dec === 'Working Tree') {
+    const badgeColor = '#06b6d4';
+    const style = `background-color: ${hexToRgba(badgeColor, 0.16)}; color: ${badgeColor}; border-color: ${hexToRgba(badgeColor, 0.45)}; font-weight: 500;`;
+    return `<span class="ref-badge badge-working-tree" style="${style}" title="工作区未提交的修改"><i class="codicon codicon-edit"></i><span class="badge-text">工作区</span></span>`;
+  }
+
   let badgeClass = 'badge-branch';
   let iconHtml = ICONS.branch;
   const cleanDec = dec.replace(/^origin\//, '').replace(/^refs\/remotes\/[^/]+\//, '');
@@ -40,6 +47,15 @@ export function makeBadgeHtml(dec: string, overrideLabel?: string, overrideColor
   let isHead = false;
   const isRemote = state.remoteBranches.includes(dec) || dec.startsWith('origin/') || dec.startsWith('refs/remotes/');
   let displayDec = overrideLabel || dec;
+
+  // Worktree awareness: if branch is checked out by another worktree, show indicator
+  if (state.worktrees && state.worktrees.length > 0 && !overrideLabel) {
+    const otherWt = state.worktrees.find(wt => !wt.isCurrent && wt.branch === cleanDec);
+    if (otherWt) {
+      const wtName = otherWt.path.split(/[/\\]/).filter(Boolean).pop() || 'worktree';
+      displayDec = `${displayDec} ⎇ ${wtName}`;
+    }
+  }
 
   if (dec.startsWith('tag: ')) {
     badgeClass = 'badge-tag';

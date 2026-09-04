@@ -116,6 +116,12 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
     if (token?.isCancellationRequested) {
       return [];
     }
+    const isEnabled = typeof vscode.workspace?.getConfiguration === 'function'
+      ? vscode.workspace.getConfiguration('git-visual').get<boolean>('showFileHeaderCodeLens', true)
+      : true;
+    if (!isEnabled) {
+      return [];
+    }
     if (document.isUntitled || document.uri.scheme !== 'file') {
       return [];
     }

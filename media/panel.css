@@ -239,6 +239,15 @@ body {
 
 .filter-group input[type="date"] {
   width: 110px;
+  color-scheme: light dark;
+}
+
+body.vscode-light .filter-group input[type="date"] {
+  color-scheme: light;
+}
+
+body.vscode-dark .filter-group input[type="date"],
+body.vscode-high-contrast .filter-group input[type="date"] {
   color-scheme: dark;
 }
 
@@ -292,9 +301,10 @@ body {
   pointer-events: auto;
 }
 
-/* Reset button */
+/* Reset, Fetch and First-Parent buttons */
 #reset-btn,
-#fetch-btn {
+#fetch-btn,
+#first-parent-btn {
   height: 26px;
   width: 26px;
   padding: 0;
@@ -314,9 +324,16 @@ body {
 
 #reset-btn:hover,
 #fetch-btn:hover,
+#first-parent-btn:hover,
 #fetch-btn.fetching {
   background-color: var(--row-hover-bg);
   color: var(--fg-color);
+}
+
+#first-parent-btn.active {
+  background-color: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
 }
 
 /* fetch 进行中：图标旋转 + 禁用点击 */
@@ -601,6 +618,25 @@ tr.commit-row.selected .commit-author-inline,
 tr.commit-row.selected .commit-date-inline,
 tr.commit-row.selected .relative-time {
   color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
+}
+
+tr.commit-row.working-tree-row {
+  font-style: italic;
+}
+
+tr.commit-row.working-tree-row .commit-message {
+  font-weight: 500;
+  color: var(--vscode-charts-yellow, #eab308);
+}
+
+.working-tree-node {
+  animation: pulse-ring 2.5s infinite ease-in-out;
+}
+
+@keyframes pulse-ring {
+  0% { stroke-opacity: 0.7; }
+  50% { stroke-opacity: 1; stroke-width: 2.2px; }
+  100% { stroke-opacity: 0.7; }
 }
 
 /* ── Row content ─────────────────────────────────── */
@@ -1429,6 +1465,38 @@ tr.commit-row.selected .relative-time {
   border: 1px solid rgba(168, 85, 247, 0.25);
 }
 
+.status-U {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.status-\? {
+  background-color: rgba(148, 163, 184, 0.15);
+  color: var(--text-secondary, #94a3b8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.file-stage-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-right: 4px;
+  line-height: 1.2;
+}
+
+.file-stage-tag.staged {
+  background-color: rgba(63, 185, 80, 0.15);
+  color: var(--color-add, #3fb950);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.file-stage-tag.unstaged {
+  background-color: rgba(234, 179, 8, 0.15);
+  color: var(--vscode-charts-yellow, #eab308);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
 .folder-children.hidden {
   display: none;
 }
@@ -1803,11 +1871,6 @@ svg#graph-svg .merge-inner.hovered {
 
 .stat-card:hover {
   opacity: 0.8;
-}
-
-.stat-card-add,
-.stat-card-del {
-  /* Removed heavy borders */
 }
 
 .stat-card-value {

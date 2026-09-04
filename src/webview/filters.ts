@@ -25,7 +25,8 @@ export function getFilters() {
     author: elements.authorSelect.value || undefined,
     since: sinceVal,
     until: untilVal,
-    query: elements.searchInput.value.trim() || undefined
+    query: elements.searchInput.value.trim() || undefined,
+    firstParent: state.firstParentOnly || undefined
   };
 }
 
@@ -153,9 +154,21 @@ export function initFilters(onFilterChange: () => void) {
     elements.dateRangeGroup.classList.add('hidden');
     elements.searchInput.value = '';
     elements.searchInput.parentElement?.classList.remove('has-value');
+    state.firstParentOnly = false;
+    if (elements.firstParentBtn) {
+      elements.firstParentBtn.classList.remove('active');
+    }
     updateSelectWidths();
     onFilterChange();
   });
+
+  if (elements.firstParentBtn) {
+    elements.firstParentBtn.addEventListener('click', () => {
+      state.firstParentOnly = !state.firstParentOnly;
+      elements.firstParentBtn.classList.toggle('active', state.firstParentOnly);
+      onFilterChange();
+    });
+  }
 
   // 从远程拉取所有分支并刷新：按钮点击时加 .fetching 进入旋转态，
   // 等 host 端 fetchRemoteDone 消息回来再清除（见 messageHandler）

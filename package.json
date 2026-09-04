@@ -34,17 +34,25 @@
     "Visualization"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onView:git-visual.graphView",
-    "onCommand:git-visual.traceOrigin",
-    "onCommand:git-visual.toggleLineBlame",
-    "onCommand:git-visual.traceFileHistory",
-    "onCommand:git-visual.openFileRecentDiff",
-    "onCommand:git-visual.showLineBlame"
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Git Look",
+      "properties": {
+        "git-visual.showFileHeaderCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否在文件顶部显示 Git 最后提交者与作者数量 (File Header CodeLens)"
+        }
+      }
+    },
     "commands": [
+      {
+        "command": "git-visual.toggleFileHeaderCodeLens",
+        "title": "Git 文件头部"
+      },
       {
         "command": "git-visual.traceOrigin",
         "title": "Git 选区历史"
@@ -86,6 +94,11 @@
       ],
       "git-visual.submenu": [
         {
+          "command": "git-visual.toggleFileHeaderCodeLens",
+          "group": "1_modification@0",
+          "when": "editorTextFocus"
+        },
+        {
           "command": "git-visual.toggleLineBlame",
           "group": "1_modification@1",
           "when": "editorTextFocus"
@@ -116,7 +129,8 @@
         {
           "type": "webview",
           "id": "git-visual.graphView",
-          "name": "Git 潮汐"
+          "name": "Git 潮汐",
+          "icon": "$(git-merge)"
         }
       ]
     }

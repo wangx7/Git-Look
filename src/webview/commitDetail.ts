@@ -46,19 +46,20 @@ export function handleRowClick(row, hash, parents) {
   ensureDetailsExpanded();
   setRightPane(RightPaneState.COMMIT);
 
-  elements.detailHashBadge.textContent = hash.substring(0, 7);
+  const isWorkingTree = (hash === '*working-tree*');
+  elements.detailHashBadge.textContent = isWorkingTree ? '工作区' : hash.substring(0, 7);
   elements.detailHashBadge.dataset.fullHash = hash;
 
   // 动态渲染详情面板的作者信息及头像
   if (elements.detailAuthorName && elements.detailAuthorDate && elements.detailAuthorAvatar) {
-    elements.detailAuthorName.textContent = commit.author;
-    elements.detailAuthorName.title = commit.email || '';
+    elements.detailAuthorName.textContent = isWorkingTree ? '本地工作区' : commit.author;
+    elements.detailAuthorName.title = isWorkingTree ? '尚未提交的内容' : (commit.email || '');
     elements.detailAuthorDate.textContent = formatDate(commit.timestamp);
-    elements.detailAuthorDate.title = getRelativeTime(commit.timestamp);
+    elements.detailAuthorDate.title = isWorkingTree ? '当前最新' : getRelativeTime(commit.timestamp);
 
-    const initials = getInitials(commit.author);
+    const initials = isWorkingTree ? 'WIP' : getInitials(commit.author);
     elements.detailAuthorAvatar.textContent = initials;
-    elements.detailAuthorAvatar.style.background = getAvatarGradient(commit.author);
+    elements.detailAuthorAvatar.style.background = isWorkingTree ? 'var(--vscode-charts-yellow, #eab308)' : getAvatarGradient(commit.author);
   }
 
   // Render all branch badges in detail panel
@@ -76,10 +77,11 @@ export function handleRowClick(row, hash, parents) {
   // 复制哈希点击事件
   elements.detailHashBadge.onclick = (e) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(hash).then(() => {
+    const copyText = isWorkingTree ? 'Working Tree' : hash;
+    navigator.clipboard.writeText(copyText).then(() => {
       elements.detailHashBadge.textContent = '已复制!';
       setTimeout(() => {
-        elements.detailHashBadge.textContent = hash.substring(0, 7);
+        elements.detailHashBadge.textContent = isWorkingTree ? '工作区' : hash.substring(0, 7);
       }, 1200);
     });
   };
@@ -304,7 +306,7 @@ export function buildFileTree(files) {
       const isFile = idx === parts.length - 1;
       if (!current._children[part]) {
         current._children[part] = isFile
-          ? { _name: part, _isFile: true, status: f.status, path: f.path }
+          ? { _name: part, _isFile: true, status: f.status, path: f.path, staged: f.staged }
           : { _name: part, _isFile: false, _children: {} };
       }
       current = current._children[part];
@@ -369,6 +371,10 @@ export function renderFileTreeHTML(node, depth, hash, parentHash) {
       const iconInfo = getFileIconInfo(child._name);
       const statusLabel = child.status;
       const statusClass = `status-${child.status}`;
+      let stageBadge = '';
+      if (child.staged !== undefined) {
+        stageBadge = `<span class="file-stage-tag ${child.staged ? 'staged' : 'unstaged'}">${child.staged ? '暂存' : (child.status === '?' ? '未跟踪' : '未暂存')}</span>`;
+      }
 
       html += `
           <div class="tree-node file-node" style="padding-left: ${indent}px;" data-path="${escapeHtml(child.path)}" data-hash="${hash}" data-parent-hash="${parentHash}">
@@ -377,6 +383,7 @@ export function renderFileTreeHTML(node, depth, hash, parentHash) {
             <span class="file-actions">
               <i class="codicon codicon-go-to-file action-btn" title="转到当前文件 (Go to Current File)"></i>
             </span>
+            ${stageBadge}
             <span class="file-status-badge ${statusClass}">${statusLabel}</span>
           </div>
         `;
@@ -438,6 +445,10 @@ export function renderFileListHTML(files, hash, parentHash) {
     const pathParts = f.path.split('/');
     const fileName = pathParts[pathParts.length - 1];
     const dirPath = pathParts.slice(0, -1).join('/');
+    let stageBadge = '';
+    if (f.staged !== undefined) {
+      stageBadge = `<span class="file-stage-tag ${f.staged ? 'staged' : 'unstaged'}">${f.staged ? '暂存' : (f.status === '?' ? '未跟踪' : '未暂存')}</span>`;
+    }
 
     html += `
         <div class="tree-node file-node" style="padding-left: 0px;" data-path="${escapeHtml(f.path)}" data-hash="${hash}" data-parent-hash="${parentHash}">
@@ -447,6 +458,7 @@ export function renderFileListHTML(files, hash, parentHash) {
           <span class="file-actions">
             <i class="codicon codicon-go-to-file action-btn" title="转到当前文件 (Go to Current File)"></i>
           </span>
+          ${stageBadge}
           <span class="file-status-badge ${statusClass}">${statusLabel}</span>
         </div>
       `;

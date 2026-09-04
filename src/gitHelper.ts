@@ -54,6 +54,7 @@ export interface GitFilters {
   since?: string;
   until?: string;
   query?: string;
+  firstParent?: boolean;
 }
 
 export interface ContributorStat {
@@ -94,6 +95,35 @@ export interface CodeStats {
   topFiles: FileStat[];
   sinceDate: string;
   untilDate: string;
+}
+
+export interface WorkingTreeFile {
+  path: string;
+  oldPath?: string;
+  status: string;
+  staged: boolean;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface WorkingTreeStatus {
+  hasChanges: boolean;
+  stagedCount: number;
+  unstagedCount: number;
+  untrackedCount: number;
+  files: WorkingTreeFile[];
+  isMerging: boolean;
+  mergeHeads: string[];
+}
+
+export interface WorktreeInfo {
+  path: string;
+  headHash: string;
+  branch?: string;
+  isBare: boolean;
+  isLocked: boolean;
+  lockReason?: string;
+  isCurrent: boolean;
 }
 
 let gitPathCache: string | undefined = undefined;
@@ -361,24 +391,27 @@ export async function getBranches(cwd: string): Promise<string[]> {
 
 export async function getAuthors(cwd: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    // No commit count limit: ensures all authors are included for large repositories.
-    // Results are deduplicated via Set, so memory usage stays bounded by unique author count.
-    const output = await execGit(['log', '--branches', '--tags', '--remotes', 'HEAD', '--pretty=format:%an'], cwd, signal);
+    // Use git shortlog -s -n: aggregated and deduplicated in Git C-core,
+    // sorted by commit count descending. Dramatically faster and avoids OOM in large repos.
+    const output = await execGit(['shortlog', '-s', '-n', '--branches', '--tags', '--remotes', 'HEAD'], cwd, signal);
     const authorsSet = new Set<string>();
-    output.split('\n').forEach(name => {
-      const trimmed = name.trim();
-      if (trimmed) {
-        authorsSet.add(trimmed);
+    output.split('\n').forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const tabIdx = trimmed.indexOf('\t');
+      const author = (tabIdx !== -1 ? trimmed.substring(tabIdx + 1) : trimmed.replace(/^\d+\s+/, '')).trim();
+      if (author) {
+        authorsSet.add(author);
       }
     });
-    return Array.from(authorsSet); // Preserves insertion order (most recent committer first)
+    return Array.from(authorsSet);
   } catch (e) {
     console.error('Error fetching authors:', e);
     return [];
   }
 }
 
-function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string | null } {
+export function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string | null } {
   const args = ['log', '--topo-order'];
   args.push('--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%d%x1f%s');
 
@@ -388,6 +421,11 @@ function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string
     if (/^[0-9a-fA-F]{7,40}$/.test(trimmed)) {
       searchHash = trimmed;
     }
+  }
+
+  // First parent filter: show only first-parent commits (clean merge-only trunk history)
+  if (filters.firstParent) {
+    args.push('--first-parent');
   }
 
   // Branch filter
@@ -420,9 +458,10 @@ function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string
     args.push(`--until=${untilVal}`);
   }
 
-  // Text search filter
+  // Text search filter: -F (--fixed-strings) ensures literal substring matching,
+  // preventing Git from crashing with regex syntax errors on inputs like '[WIP]', '(fix)'
   if (filters.query && !searchHash) {
-    args.push(`--grep=${filters.query}`, '-i');
+    args.push('-F', `--grep=${filters.query}`, '-i');
   }
 
   return { args, searchHash };
@@ -1230,5 +1269,224 @@ export async function isFileTracked(
     return false;
   }
 }
+
+export async function getWorkingTreeStatus(
+  gitRoot: string,
+  signal?: AbortSignal
+): Promise<WorkingTreeStatus> {
+  try {
+    const [statusOutput, numstatOutput, mergeHeadOutput] = await Promise.all([
+      execGit(['status', '--porcelain=v1', '-z', '-u'], gitRoot, signal).catch(() => ''),
+      execGit(['diff', 'HEAD', '--numstat'], gitRoot, signal).catch(() => ''),
+      execGit(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], gitRoot, signal).catch(() => '')
+    ]);
+
+    const isMerging = mergeHeadOutput.trim().length > 0;
+    const mergeHeads = isMerging ? mergeHeadOutput.trim().split(/\s+/).filter(Boolean) : [];
+
+    const numstats = new Map<string, { additions: number; deletions: number }>();
+    if (numstatOutput) {
+      numstatOutput.split('\n').filter(Boolean).forEach(line => {
+        const parts = line.split('\t');
+        if (parts.length >= 3) {
+          const add = parts[0] === '-' ? 0 : parseInt(parts[0], 10);
+          const del = parts[1] === '-' ? 0 : parseInt(parts[1], 10);
+          const filePath = parts[2];
+          numstats.set(filePath, { additions: add, deletions: del });
+        }
+      });
+    }
+
+    const files: WorkingTreeFile[] = [];
+    let stagedCount = 0;
+    let unstagedCount = 0;
+    let untrackedCount = 0;
+
+    if (statusOutput) {
+      const tokens = statusOutput.split('\0');
+      let i = 0;
+      while (i < tokens.length) {
+        const token = tokens[i];
+        if (!token) {
+          i++;
+          continue;
+        }
+
+        const indexStatus = token.charAt(0);
+        const worktreeStatus = token.charAt(1);
+        const filePath = token.substring(3);
+        let oldPath: string | undefined;
+
+        if (indexStatus === 'R' || indexStatus === 'C') {
+          i++;
+          if (i < tokens.length) {
+            oldPath = tokens[i];
+          }
+        }
+
+        const isUntracked = (indexStatus === '?' && worktreeStatus === '?');
+        const isConflict = (indexStatus === 'U' || worktreeStatus === 'U' || (indexStatus === 'A' && worktreeStatus === 'A') || (indexStatus === 'D' && worktreeStatus === 'D'));
+        
+        const stat = numstats.get(filePath);
+
+        if (isUntracked) {
+          untrackedCount++;
+          files.push({
+            path: filePath,
+            status: '?',
+            staged: false,
+            additions: stat?.additions,
+            deletions: stat?.deletions
+          });
+        } else if (isConflict) {
+          unstagedCount++;
+          files.push({
+            path: filePath,
+            oldPath,
+            status: 'U',
+            staged: false,
+            additions: stat?.additions,
+            deletions: stat?.deletions
+          });
+        } else {
+          // Has staged changes
+          if (indexStatus !== ' ' && indexStatus !== '?') {
+            stagedCount++;
+            files.push({
+              path: filePath,
+              oldPath,
+              status: indexStatus,
+              staged: true,
+              additions: stat?.additions,
+              deletions: stat?.deletions
+            });
+          }
+          // Has unstaged changes
+          if (worktreeStatus !== ' ' && worktreeStatus !== '?') {
+            unstagedCount++;
+            files.push({
+              path: filePath,
+              oldPath,
+              status: worktreeStatus,
+              staged: false,
+              additions: stat?.additions,
+              deletions: stat?.deletions
+            });
+          }
+        }
+
+        i++;
+      }
+    }
+
+    const hasChanges = files.length > 0 || isMerging;
+
+    return {
+      hasChanges,
+      stagedCount,
+      unstagedCount,
+      untrackedCount,
+      files,
+      isMerging,
+      mergeHeads
+    };
+  } catch (e: any) {
+    if (e?.message !== 'ABORTED' && !signal?.aborted) {
+      console.error('Error getting working tree status:', e);
+    }
+    return {
+      hasChanges: false,
+      stagedCount: 0,
+      unstagedCount: 0,
+      untrackedCount: 0,
+      files: [],
+      isMerging: false,
+      mergeHeads: []
+    };
+  }
+}
+
+export async function getWorktrees(
+  gitRoot: string,
+  signal?: AbortSignal
+): Promise<WorktreeInfo[]> {
+  try {
+    const output = await execGit(['worktree', 'list', '--porcelain'], gitRoot, signal);
+    const lines = output.split('\n');
+    const worktrees: WorktreeInfo[] = [];
+    let currentWt: Partial<WorktreeInfo> | null = null;
+
+    const normalizedGitRoot = path.resolve(gitRoot);
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        if (currentWt && currentWt.path && currentWt.headHash) {
+          worktrees.push({
+            path: currentWt.path,
+            headHash: currentWt.headHash,
+            branch: currentWt.branch,
+            isBare: !!currentWt.isBare,
+            isLocked: !!currentWt.isLocked,
+            lockReason: currentWt.lockReason,
+            isCurrent: path.resolve(currentWt.path) === normalizedGitRoot
+          });
+          currentWt = null;
+        }
+        continue;
+      }
+
+      if (trimmed.startsWith('worktree ')) {
+        if (currentWt && currentWt.path && currentWt.headHash) {
+          worktrees.push({
+            path: currentWt.path,
+            headHash: currentWt.headHash,
+            branch: currentWt.branch,
+            isBare: !!currentWt.isBare,
+            isLocked: !!currentWt.isLocked,
+            lockReason: currentWt.lockReason,
+            isCurrent: path.resolve(currentWt.path) === normalizedGitRoot
+          });
+        }
+        currentWt = { path: trimmed.substring(9).trim() };
+      } else if (currentWt) {
+        if (trimmed.startsWith('HEAD ')) {
+          currentWt.headHash = trimmed.substring(5).trim();
+        } else if (trimmed.startsWith('branch ')) {
+          const rawBranch = trimmed.substring(7).trim();
+          currentWt.branch = rawBranch.replace(/^refs\/heads\//, '');
+        } else if (trimmed === 'bare') {
+          currentWt.isBare = true;
+        } else if (trimmed.startsWith('locked')) {
+          currentWt.isLocked = true;
+          const reason = trimmed.substring(6).trim();
+          if (reason) {
+            currentWt.lockReason = reason;
+          }
+        }
+      }
+    }
+
+    if (currentWt && currentWt.path && currentWt.headHash) {
+      worktrees.push({
+        path: currentWt.path,
+        headHash: currentWt.headHash,
+        branch: currentWt.branch,
+        isBare: !!currentWt.isBare,
+        isLocked: !!currentWt.isLocked,
+        lockReason: currentWt.lockReason,
+        isCurrent: path.resolve(currentWt.path) === normalizedGitRoot
+      });
+    }
+
+    return worktrees;
+  } catch (e: any) {
+    if (e?.message !== 'ABORTED' && !signal?.aborted) {
+      console.error('Error listing worktrees:', e);
+    }
+    return [];
+  }
+}
+
 
 

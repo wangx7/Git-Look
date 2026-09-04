@@ -27,7 +27,11 @@ jest.mock('vscode', () => ({
   })),
   CodeLens: jest.fn((range, command) => ({ range, command })),
   window: {},
-  workspace: {},
+  workspace: {
+    getConfiguration: jest.fn(() => ({
+      get: jest.fn((key, def) => def)
+    }))
+  },
   languages: {
     registerCodeLensProvider: jest.fn(() => ({ dispose: jest.fn() }))
   },
@@ -197,6 +201,21 @@ describe('fileHeaderCodeLens', () => {
       expect(lenses[0].command.arguments).toEqual([document.uri.fsPath, 'workingTree', undefined, true]);
       expect(lenses[1].command.command).toBe('git-visual.showLineBlame');
       expect(lenses[1].command.arguments).toEqual([true]);
+    });
+
+    it('should return empty array when showFileHeaderCodeLens configuration is false', async () => {
+      (vscode.workspace.getConfiguration as jest.Mock).mockReturnValue({
+        get: jest.fn((key, def) => key === 'showFileHeaderCodeLens' ? false : def)
+      });
+
+      const provider = new FileHeaderCodeLensProvider(createMockRepoManager());
+      const document = {
+        isUntitled: false,
+        uri: { scheme: 'file', fsPath: path.join('/mock/git/root', 'file.ts') }
+      } as any;
+
+      const lenses = await provider.provideCodeLenses(document, createMockToken());
+      expect(lenses).toEqual([]);
     });
   });
 });

@@ -13,6 +13,8 @@ import { constants } from './constants';
 import { updateRepoSelector, updateRepoSelectorVisibility } from './repoSelector';
 
 import { initCommitTooltip } from './commitTooltip';
+import { drawSvg } from './svgRenderer';
+import { renderActivityChart, renderOverviewStats } from './statsCharts';
 
 window.vscode = acquireVsCodeApi();
 const vscode = window.vscode;
@@ -50,16 +52,14 @@ function init() {
   });
 
   window.addEventListener('detailsExpanded', () => {
-    import('./svgRenderer').then(({ drawSvg }) => drawSvg(state.lastStartIndex || 0, state.lastEndIndex || state.commits.length - 1)).catch(err => console.error('Failed to load svgRenderer module:', err));
+    drawSvg(state.lastStartIndex || 0, state.lastEndIndex || state.commits.length - 1);
     if (state.currentStatsData && state.currentStatsData.dailyActivity) {
-      import('./statsCharts').then(({ renderActivityChart }) => {
-        const s = state.currentStatsData;
-        if (s.hourlyActivity) {
-          renderActivityChart(s.hourlyActivity, 'hourly');
-        } else {
-          renderActivityChart(s.dailyActivity, 'daily');
-        }
-      }).catch(err => console.error('Failed to load statsCharts module:', err));
+      const s = state.currentStatsData;
+      if (s.hourlyActivity) {
+        renderActivityChart(s.hourlyActivity, 'hourly');
+      } else {
+        renderActivityChart(s.dailyActivity, 'daily');
+      }
     }
   });
 
@@ -78,10 +78,8 @@ function init() {
         const sel = elements.commitsTbody.querySelector('tr.commit-row.selected');
         if (sel) sel.classList.remove('selected');
         state.selectedCommitHash = null;
-        import('./statsCharts').then(({ renderOverviewStats }) => {
-            renderOverviewStats(state.currentStatsData);
-            setRightPane(RightPaneState.OVERVIEW);
-        }).catch(err => console.error('Failed to load statsCharts module:', err));
+        renderOverviewStats(state.currentStatsData);
+        setRightPane(RightPaneState.OVERVIEW);
       }
     });
   }
@@ -90,10 +88,8 @@ function init() {
     elements.authorBackBtn.addEventListener('click', () => {
       state.currentFocusedAuthor = null;
       if (state.currentStatsData) {
-        import('./statsCharts').then(({ renderOverviewStats }) => {
-          renderOverviewStats(state.currentStatsData);
-          setRightPane(RightPaneState.OVERVIEW);
-        }).catch(err => console.error('Failed to load statsCharts module:', err));
+        renderOverviewStats(state.currentStatsData);
+        setRightPane(RightPaneState.OVERVIEW);
       }
     });
   }

@@ -1,8 +1,10 @@
 import { state } from './state';
 import { elements } from './dom';
 import { reloadData, hideLoading, saveCurrentState, showError } from './dataLoader';
-import { updateFilterControls } from './filters';
+import { updateFilterControls, updateSelectWidths } from './filters';
 import { renderTableAndGraph } from './graphLayout';
+import { renderFileHistory } from './fileHistory';
+import { constants } from './constants';
 import { renderCommitDetail, focusAndHighlightCommit } from './commitDetail';
 import { renderSelectionHistory } from './selectionHistory';
 import { renderFileBlameStats } from './roseChart';
@@ -74,7 +76,8 @@ export function initMessageHandler() {
   
         if (page === 0) {
           state.commits = newCommits;
-          state.hasMoreCommits = newCommits.length === state.pageSize;
+          const realCount = newCommits.filter((c: any) => c.hash !== '*working-tree*').length;
+          state.hasMoreCommits = realCount >= state.pageSize;
         } else {
           state.commits = state.commits.concat(newCommits);
           state.hasMoreCommits = newCommits.length === state.pageSize;
@@ -83,6 +86,7 @@ export function initMessageHandler() {
         state.branches = message.branches;
         state.remoteBranches = message.remoteBranches || [];
         state.authors = message.authors;
+        state.worktrees = message.worktrees || [];
   
         updateFilterControls();
         renderTableAndGraph();
@@ -100,9 +104,7 @@ export function initMessageHandler() {
       case 'showFileHistory':
         hideLoading();
         state.isFetching = false;
-        import('./fileHistory').then(({ renderFileHistory }) => {
-          renderFileHistory(message.filePath, message.commits);
-        }).catch(err => console.error('Failed to load fileHistory module:', err));
+        renderFileHistory(message.filePath, message.commits);
         break;
       case 'showFileBlameStats':
         renderFileBlameStats(message.fileName, message.stats);
@@ -131,7 +133,7 @@ export function initMessageHandler() {
           elements.untilDate.value = '';
           elements.dateRangeGroup.classList.add('hidden');
           elements.searchInput.value = '';
-          import('./filters').then(({ updateSelectWidths }) => updateSelectWidths()).catch(err => console.error('Failed to load filters module:', err));
+          updateSelectWidths();
         }
   
         state.commits = message.commits;
@@ -141,6 +143,7 @@ export function initMessageHandler() {
         state.branches = message.branches;
         state.remoteBranches = message.remoteBranches || [];
         state.authors = message.authors;
+        state.worktrees = message.worktrees || [];
   
         updateFilterControls();
         renderTableAndGraph();
@@ -152,17 +155,15 @@ export function initMessageHandler() {
           requestAnimationFrame(() => {
             const index = state.commits.findIndex(c => c.hash === message.hash);
             if (index === -1) return;
-            import('./constants').then(({ constants }) => {
-                const rowHeight = constants.rowHeight;
-                elements.tableContainer.scrollTop = Math.max(0, index * rowHeight - elements.tableContainer.clientHeight / 2 + rowHeight / 2);
-                updateVirtualList();
-                let row = elements.commitsTbody.querySelector(`tr.commit-row[data-hash="${message.hash}"]`);
-                if (row) {
-                  if (state.selectedCommitHash !== (row as HTMLElement).dataset.hash) {
-                    (row as HTMLElement).click();
-                  }
-                }
-            }).catch(err => console.error('Failed to load constants module:', err));
+            const rowHeight = constants.rowHeight;
+            elements.tableContainer.scrollTop = Math.max(0, index * rowHeight - elements.tableContainer.clientHeight / 2 + rowHeight / 2);
+            updateVirtualList();
+            let row = elements.commitsTbody.querySelector(`tr.commit-row[data-hash="${message.hash}"]`);
+            if (row) {
+              if (state.selectedCommitHash !== (row as HTMLElement).dataset.hash) {
+                (row as HTMLElement).click();
+              }
+            }
           });
         });
         break;

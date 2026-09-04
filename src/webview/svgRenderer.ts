@@ -42,7 +42,9 @@ export function drawSvg(startIndex: number, endIndex: number) {
     return rowIndex * rowHeight + rowHeight / 2;
   }
 
-  // ── Path rendering (elegant "guqin string" style: smooth gentle S-curves) ──
+  // ── Path rendering (Batched by branch/stroke to minimize DOM nodes) ──
+  const pathGroups = new Map<string, { branchId: number; color: string; strokeWidth: number; d: string; isDotted?: boolean }>();
+
   state.cachedLines.forEach(line => {
     // SVG path virtualization check: only draw paths that intersect the visible indices
     const minRow = Math.min(line.fromRow, line.toRow);
@@ -61,54 +63,67 @@ export function drawSvg(startIndex: number, endIndex: number) {
     const branchId = line.colorIdx;
     const color = getBranchColor(branchId);
 
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('class', `lane-path-${branchId}`);
-
     const isMergeLine = line.isMergeLine;
     const isMainTrunk = (line.colorIdx === 0 && !isMergeLine);
-    const strokeWidth = isMainTrunk ? 2 : (isMergeLine ? 1.5 : 1.5);
+    const strokeWidth = isMainTrunk ? 2 : 1.5;
 
     const segH = y2 - y1;
     const topCurve = (x_from !== x_run);
     const botCurve = (x_run !== x_to);
 
-    let d = `M ${x_from} ${y1}`;
+    let segD = `M ${x_from} ${y1}`;
 
     if (!topCurve && !botCurve) {
-      d += ` L ${x_to} ${y2}`;
+      segD += ` L ${x_to} ${y2}`;
     } else if (topCurve && !botCurve) {
       const curveH = Math.min(rowHeight, segH);
       const y_mid = y1 + curveH / 2;
-      d += ` C ${x_from} ${y_mid}, ${x_run} ${y_mid}, ${x_run} ${y1 + curveH}`;
+      segD += ` C ${x_from} ${y_mid}, ${x_run} ${y_mid}, ${x_run} ${y1 + curveH}`;
       if (y1 + curveH < y2) {
-        d += ` L ${x_run} ${y2}`;
+        segD += ` L ${x_run} ${y2}`;
       }
     } else if (!topCurve && botCurve) {
       const curveH = Math.min(rowHeight, segH);
       const curveStartY = y2 - curveH;
       if (y1 < curveStartY) {
-        d += ` L ${x_run} ${curveStartY}`;
+        segD += ` L ${x_run} ${curveStartY}`;
       }
       const y_mid = curveStartY + curveH / 2;
-      d += ` C ${x_run} ${y_mid}, ${x_to} ${y_mid}, ${x_to} ${y2}`;
+      segD += ` C ${x_run} ${y_mid}, ${x_to} ${y_mid}, ${x_to} ${y2}`;
     } else {
       const curveH = Math.min(rowHeight, segH / 2);
       const topEnd = y1 + curveH;
       const botStart = y2 - curveH;
 
-      d += ` C ${x_from} ${y1 + curveH / 2}, ${x_run} ${y1 + curveH / 2}, ${x_run} ${topEnd}`;
+      segD += ` C ${x_from} ${y1 + curveH / 2}, ${x_run} ${y1 + curveH / 2}, ${x_run} ${topEnd}`;
       if (botStart > topEnd) {
-        d += ` L ${x_run} ${botStart}`;
+        segD += ` L ${x_run} ${botStart}`;
       }
-      d += ` C ${x_run} ${botStart + curveH / 2}, ${x_to} ${botStart + curveH / 2}, ${x_to} ${y2}`;
+      segD += ` C ${x_run} ${botStart + curveH / 2}, ${x_to} ${botStart + curveH / 2}, ${x_to} ${y2}`;
     }
 
-    path.setAttribute('d', d);
-    path.setAttribute('stroke', color);
-    path.setAttribute('stroke-width', strokeWidth.toString());
-    path.setAttribute('fill', 'none');
+    const isDotted = !!line.isWorkingTreeLine;
+    const groupKey = `${branchId}_${strokeWidth}_${isDotted ? 'dashed' : 'solid'}`;
+    const existing = pathGroups.get(groupKey);
+    if (existing) {
+      existing.d += ' ' + segD;
+    } else {
+      pathGroups.set(groupKey, { branchId, color, strokeWidth, d: segD, isDotted });
+    }
+  });
 
-    path.addEventListener('mouseover', () => highlightLane(line.colorIdx));
+  pathGroups.forEach(group => {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('class', `lane-path-${group.branchId}`);
+    path.setAttribute('d', group.d);
+    path.setAttribute('stroke', group.color);
+    path.setAttribute('stroke-width', group.strokeWidth.toString());
+    path.setAttribute('fill', 'none');
+    if (group.isDotted) {
+      path.setAttribute('stroke-dasharray', '4,3');
+    }
+
+    path.addEventListener('mouseover', () => highlightLane(group.branchId));
     path.addEventListener('mouseout', clearLaneHighlight);
 
     elements.graphSvg.appendChild(path);
@@ -126,7 +141,35 @@ export function drawSvg(startIndex: number, endIndex: number) {
     const color = getBranchColor(branchId);
     const isSelected = (c.hash === state.selectedCommitHash);
 
-    if (node.isMerge) {
+    if (c.hash === '*working-tree*') {
+      const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      group.setAttribute('class', `node-group-${c.hash}`);
+
+      const outer = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      outer.setAttribute('class', `node-${c.hash} lane-node-${branchId} working-tree-node${isSelected ? ' selected' : ''}`);
+      outer.setAttribute('cx', String(x));
+      outer.setAttribute('cy', String(y));
+      outer.setAttribute('r', isSelected ? '6.5' : '5.5');
+      outer.setAttribute('fill', 'var(--bg-color)');
+      outer.setAttribute('stroke', color);
+      outer.setAttribute('stroke-width', '1.8');
+      outer.setAttribute('stroke-dasharray', '2.5,2');
+
+      const inner = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      inner.setAttribute('class', `node-${c.hash} lane-node-${branchId} working-tree-inner${isSelected ? ' selected' : ''}`);
+      inner.setAttribute('cx', String(x));
+      inner.setAttribute('cy', String(y));
+      inner.setAttribute('r', '2');
+      inner.setAttribute('fill', color);
+
+      group.appendChild(outer);
+      group.appendChild(inner);
+
+      group.addEventListener('mouseover', () => highlightLane(branchId));
+      group.addEventListener('mouseout', clearLaneHighlight);
+
+      elements.graphSvg.appendChild(group);
+    } else if (node.isMerge) {
       const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       group.setAttribute('class', `node-group-${c.hash}`);
 

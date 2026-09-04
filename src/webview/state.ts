@@ -1,10 +1,11 @@
-import { Commit, CodeStats, WebviewState, RightPaneState, RightPaneStateType, Filters, RepoInfo } from './types';
+import { Commit, CodeStats, WebviewState, RightPaneState, RightPaneStateType, Filters, RepoInfo, WorktreeInfo } from './types';
 
 export class StateManager {
   commits: Commit[] = [];
   branches: string[] = [];
   remoteBranches: string[] = [];
   authors: string[] = [];
+  worktrees: WorktreeInfo[] = [];
   selectedCommitHash: string | null = null;
   expandedRow: string | null = null;
   currentGraphWidth: number = 120;
@@ -26,6 +27,7 @@ export class StateManager {
   repos: RepoInfo[] = [];
   selectedRepoIndex: number = 0;
   commitDetailViewMode: 'tree' | 'list' = 'tree';
+  firstParentOnly: boolean = false;
 
   getRightPaneStateNumber(): number {
     if (this.rightPaneVisible === 0) {

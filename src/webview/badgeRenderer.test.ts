@@ -44,6 +44,22 @@ describe('badgeRenderer', () => {
       expect(html).toContain('feature');
       expect(html).toContain('#ff00ff');
     });
+
+    it('renders a Working Tree badge', () => {
+      const html = makeBadgeHtml('Working Tree');
+      expect(html).toContain('badge-working-tree');
+      expect(html).toContain('工作区');
+      expect(html).toContain('codicon-edit');
+    });
+
+    it('renders worktree indicator when branch is checked out in another worktree', () => {
+      state.worktrees = [
+        { path: '/mock/path', headHash: '111', isBare: false, isLocked: false, isCurrent: true },
+        { path: '/mock/worktrees/hotfix', headHash: '222', branch: 'hotfix', isBare: false, isLocked: false, isCurrent: false }
+      ];
+      const html = makeBadgeHtml('hotfix');
+      expect(html).toContain('hotfix ⎇ hotfix');
+    });
   });
 
   describe('renderInlineBadges', () => {

@@ -11,8 +11,20 @@ export interface Commit {
 export interface FileChange {
   status: string;
   path: string;
+  oldPath?: string;
   additions: number;
   deletions: number;
+  staged?: boolean;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  headHash: string;
+  branch?: string;
+  isBare: boolean;
+  isLocked: boolean;
+  lockReason?: string;
+  isCurrent: boolean;
 }
 
 export interface ContributorStats {
@@ -60,6 +72,7 @@ export interface Filters {
   since?: string;
   until?: string;
   query?: string;
+  firstParent?: boolean;
 }
 
 export interface WebviewState {

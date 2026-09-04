@@ -82,8 +82,13 @@ export function renderTableAndGraph() {
 
   // Determine if a commit is main trunk
   const mainTrunk = new Set();
-  const headCommit = state.commits.find(c => c.decorations && c.decorations.includes('HEAD'));
-  let curr = headCommit ? headCommit.hash : (state.commits[0] ? state.commits[0].hash : null);
+  let curr: string | null = null;
+  if (state.commits[0] && state.commits[0].hash === '*working-tree*') {
+    curr = state.commits[0].hash;
+  } else {
+    const headCommit = state.commits.find(c => c.decorations && c.decorations.some(d => d === 'HEAD' || d.startsWith('HEAD ->')));
+    curr = headCommit ? headCommit.hash : (state.commits[0] ? state.commits[0].hash : null);
+  }
   while (curr) {
     mainTrunk.add(curr);
     const c = hashToCommitMap.get(curr);
@@ -175,7 +180,8 @@ export function renderTableAndGraph() {
           toLane: targetLaneIdx,
           runningLane: laneIdx,
           toHash: p0,
-          colorIdx: nodeColorIdx
+          colorIdx: nodeColorIdx,
+          isWorkingTreeLine: (hash === '*working-tree*')
         });
       } else {
         // Parent not loaded
@@ -188,7 +194,8 @@ export function renderTableAndGraph() {
             toLane: laneIdx,
             runningLane: laneIdx,
             toHash: p0,
-            colorIdx: nodeColorIdx
+            colorIdx: nodeColorIdx,
+            isWorkingTreeLine: (hash === '*working-tree*')
           });
         }
       }
@@ -233,7 +240,8 @@ export function renderTableAndGraph() {
             runningLane: targetLaneIdx,
             toHash: pk,
             colorIdx: targetColorIdx,
-            isMergeLine: true
+            isMergeLine: true,
+            isWorkingTreeLine: (hash === '*working-tree*')
           });
         } else {
           // Secondary parent not loaded

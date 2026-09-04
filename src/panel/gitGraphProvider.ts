@@ -1,8 +1,14 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri, toWorkingTreeUri, suppressWatchRefresh, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory } from '../gitHelper';
+import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri, toWorkingTreeUri, suppressWatchRefresh, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory, getWorkingTreeStatus, getWorktrees, WorktreeInfo } from '../gitHelper';
 import { RepoManager } from '../repoManager';
+
+export interface IBlameManager {
+  highlightCommitLines(editor: vscode.TextEditor, hash: string, color: string): void;
+  clearHighlight(editor: vscode.TextEditor): void;
+  turnOff(): void;
+}
 
 export class GitGraphProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'git-visual.graphView';
@@ -10,7 +16,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _abortController?: AbortController;
   private _statsAbortController?: AbortController;
   private _autoLoadAbortController?: AbortController; // #10: cancel stale auto-load requests
-  private blameManager?: any;
+  private blameManager?: IBlameManager;
   private _currentGitDir?: string;
   private _gitWatcher?: vscode.FileSystemWatcher;
   private _debounceTimer?: NodeJS.Timeout;
@@ -49,7 +55,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     private readonly _repoManager: RepoManager
   ) { }
 
-  public setBlameManager(manager: any) {
+  public setBlameManager(manager: IBlameManager) {
     this.blameManager = manager;
   }
 
@@ -158,17 +164,49 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
             const pageSize = 150;
             const skip = page * pageSize;
 
-            const [branches, remoteBranches, authors, commits] = await Promise.all([
+            const [branches, remoteBranches, authors, commits, worktrees] = await Promise.all([
               getBranches(gitRoot),
               execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out =>
                 out.split('\n').map(b => b.trim()).filter(Boolean)
               ).catch(() => []),
               getAuthors(gitRoot, signal),
-              getCommits(gitRoot, data.filters || {}, skip, pageSize, signal)
+              getCommits(gitRoot, data.filters || {}, skip, pageSize, signal),
+              getWorktrees(gitRoot, signal)
             ]);
 
             if (signal.aborted) {
               return;
+            }
+
+            // Inject working tree virtual node on page 0 if not filtered out and working tree has modifications
+            if (page === 0) {
+              const filters = data.filters || {};
+              const hasStrictFilter = !!(filters.author || filters.since || filters.until || filters.query);
+              if (!hasStrictFilter) {
+                try {
+                  const wtStatus = await getWorkingTreeStatus(gitRoot, signal);
+                  if (wtStatus.hasChanges) {
+                    const headCommit = commits.find(c => c.decorations && c.decorations.some(d => d === 'HEAD' || d.startsWith('HEAD ->'))) || commits[0];
+                    const headHash = headCommit ? headCommit.hash : undefined;
+                    const parents = wtStatus.isMerging && wtStatus.mergeHeads.length > 0
+                      ? (headHash ? [headHash, ...wtStatus.mergeHeads] : wtStatus.mergeHeads)
+                      : (headHash ? [headHash] : []);
+                    const totalChanges = wtStatus.files.length;
+                    const summary = `未提交的修改 (${totalChanges} 个文件${wtStatus.isMerging ? ' · 合并冲突中' : ''})`;
+                    commits.unshift({
+                      hash: '*working-tree*',
+                      parents,
+                      author: 'You',
+                      email: '',
+                      timestamp: Math.floor(Date.now() / 1000),
+                      decorations: ['Working Tree'],
+                      message: summary
+                    });
+                  }
+                } catch {
+                  // Ignore working tree status errors
+                }
+              }
             }
 
             webviewView.webview.postMessage({
@@ -177,6 +215,7 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
               remoteBranches,
               authors,
               commits,
+              worktrees,
               page
             });
           } catch (err: any) {
@@ -274,6 +313,26 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         }
         case 'getCommitDetail': {
           try {
+            if (data.hash === '*working-tree*') {
+              const wtStatus = await getWorkingTreeStatus(gitRoot);
+              const files = wtStatus.files.map(f => ({
+                status: f.status,
+                path: f.path,
+                oldPath: f.oldPath,
+                additions: f.additions ?? 0,
+                deletions: f.deletions ?? 0,
+                staged: f.staged
+              }));
+
+              webviewView.webview.postMessage({
+                type: 'commitDetail',
+                hash: '*working-tree*',
+                files,
+                isWorkingTree: true
+              });
+              break;
+            }
+
             // Get files changed in this commit including additions/deletions and handling merge commits (-m)
             const [statusOut, numstatOut] = await Promise.all([
               execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', '-m', '--root', data.hash], gitRoot),
@@ -318,8 +377,28 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'openDiff': {
-          const { file, hash } = data;
+          const { hash } = data;
+          const file = (data.file || '').replace(/\\/g, '/');
           let parentHash = data.parentHash;
+
+          if (hash === '*working-tree*') {
+            const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
+            const fileUri = vscode.Uri.file(absoluteFilePath);
+            const relativeFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
+
+            let leftUri: vscode.Uri;
+            try {
+              await execGit(['cat-file', '-e', `HEAD:${relativeFilePath}`], gitRoot);
+              leftUri = await toGitUri(fileUri, 'HEAD');
+            } catch {
+              leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
+            }
+
+            const rightUri = fileUri;
+            const title = `${path.basename(file)} (HEAD vs 本地工作区)`;
+            await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+            break;
+          }
 
           try {
             const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], gitRoot)).trim();
@@ -399,7 +478,10 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'openSingleDiff': {
-          const { file, hash, lineRange, oldFilePath, newFilePath } = data;
+          const { hash, lineRange } = data;
+          const file = (data.file || '').replace(/\\/g, '/');
+          const oldFilePath = data.oldFilePath ? data.oldFilePath.replace(/\\/g, '/') : undefined;
+          const newFilePath = data.newFilePath ? data.newFilePath.replace(/\\/g, '/') : undefined;
           let parentHash = data.parentHash;
 
           const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);

@@ -12,7 +12,11 @@ import {
   toWorkingTreeUri,
   suppressWatchRefresh,
   shouldSkipWatchRefresh,
-  getCodeStats
+  getCodeStats,
+  getAuthors,
+  buildLogArgs,
+  getWorkingTreeStatus,
+  getWorktrees
 } from '../gitHelper';
 import * as cp from 'child_process';
 import * as vscode from 'vscode';
@@ -362,6 +366,136 @@ describe('gitHelper', () => {
       expect(stats.hourlyActivity).not.toBeNull();
       expect(stats.hourlyActivity!.length).toBe(24);
       expect(stats.hourlyActivity!.every(h => h.count === 0)).toBe(true);
+    });
+  });
+
+  describe('getAuthors with git shortlog', () => {
+    it('should parse tab-delimited shortlog output correctly and deduplicate', async () => {
+      const mockOutput = '    15\twangx\n     8\tjiapengyan\n     2\twangx\n';
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('shortlog')) {
+          cb(null, mockOutput, '');
+        } else {
+          cb(null, '', '');
+        }
+      });
+
+      const authors = await getAuthors('/mock/path');
+      expect(authors).toEqual(['wangx', 'jiapengyan']);
+    });
+
+    it('should handle space-delimited shortlog lines gracefully', async () => {
+      const mockOutput = '10 Alice Smith\n5 Bob Jones\n';
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('shortlog')) {
+          cb(null, mockOutput, '');
+        } else {
+          cb(null, '', '');
+        }
+      });
+
+      const authors = await getAuthors('/mock/path');
+      expect(authors).toEqual(['Alice Smith', 'Bob Jones']);
+    });
+  });
+
+  describe('buildLogArgs', () => {
+    it('should include -F with --grep to treat search query as fixed string', () => {
+      const { args } = buildLogArgs({ query: '[WIP] Fix (core)' });
+      expect(args).toContain('-F');
+      expect(args).toContain('--grep=[WIP] Fix (core)');
+    });
+
+    it('should include --first-parent when firstParent filter is true', () => {
+      const { args } = buildLogArgs({ firstParent: true });
+      expect(args).toContain('--first-parent');
+    });
+
+    it('should not include --first-parent when firstParent filter is false or undefined', () => {
+      const { args } = buildLogArgs({});
+      expect(args).not.toContain('--first-parent');
+    });
+  });
+
+  describe('getWorkingTreeStatus', () => {
+    it('should parse status porcelain v1 with staged, unstaged, untracked, and conflict files', async () => {
+      const statusOutput = 'M  src/staged.ts\0 M src/unstaged.ts\0?? untracked.txt\0R  newname.ts\0oldname.ts\0UU conflict.ts\0';
+      const numstatOutput = '5\t2\tsrc/staged.ts\n10\t1\tsrc/unstaged.ts\n';
+
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('status')) {
+          cb(null, statusOutput, '');
+        } else if (args.includes('diff') && args.includes('--numstat')) {
+          cb(null, numstatOutput, '');
+        } else if (args.includes('MERGE_HEAD')) {
+          cb(null, 'mergehash123\n', '');
+        } else {
+          cb(null, '', '');
+        }
+      });
+
+      const wtStatus = await getWorkingTreeStatus('/mock/path');
+      expect(wtStatus.hasChanges).toBe(true);
+      expect(wtStatus.isMerging).toBe(true);
+      expect(wtStatus.mergeHeads).toEqual(['mergehash123']);
+      expect(wtStatus.stagedCount).toBe(2); // src/staged.ts (M ) and newname.ts (R )
+      expect(wtStatus.unstagedCount).toBe(2); // src/unstaged.ts ( M) and conflict.ts (UU)
+      expect(wtStatus.untrackedCount).toBe(1); // untracked.txt (??)
+
+      const stagedFile = wtStatus.files.find(f => f.path === 'src/staged.ts');
+      expect(stagedFile).toBeDefined();
+      expect(stagedFile?.staged).toBe(true);
+      expect(stagedFile?.additions).toBe(5);
+      expect(stagedFile?.deletions).toBe(2);
+
+      const renamedFile = wtStatus.files.find(f => f.path === 'newname.ts');
+      expect(renamedFile).toBeDefined();
+      expect(renamedFile?.oldPath).toBe('oldname.ts');
+    });
+
+    it('should return hasChanges false when working tree is completely clean', async () => {
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        cb(null, '', '');
+      });
+
+      const wtStatus = await getWorkingTreeStatus('/mock/path');
+      expect(wtStatus.hasChanges).toBe(false);
+      expect(wtStatus.files.length).toBe(0);
+      expect(wtStatus.isMerging).toBe(false);
+    });
+  });
+
+  describe('getWorktrees', () => {
+    it('should parse git worktree list porcelain output correctly', async () => {
+      const mockWorktreeOutput = 
+        'worktree /mock/path\n' +
+        'HEAD 1111111111111111111111111111111111111111\n' +
+        'branch refs/heads/main\n\n' +
+        'worktree /mock/other-worktree\n' +
+        'HEAD 2222222222222222222222222222222222222222\n' +
+        'branch refs/heads/feature-wt\n' +
+        'locked working on hotfix\n';
+
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('worktree')) {
+          cb(null, mockWorktreeOutput, '');
+        } else {
+          cb(null, '', '');
+        }
+      });
+
+      const worktrees = await getWorktrees('/mock/path');
+      expect(worktrees.length).toBe(2);
+      expect(worktrees[0].path).toBe('/mock/path');
+      expect(worktrees[0].branch).toBe('main');
+      expect(worktrees[0].isCurrent).toBe(true);
+      expect(worktrees[0].isLocked).toBe(false);
+
+      expect(worktrees[1].path).toBe('/mock/other-worktree');
+      expect(worktrees[1].branch).toBe('feature-wt');
+      expect(worktrees[1].isCurrent).toBe(false);
+      expect(worktrees[1].isLocked).toBe(true);
+      expect(worktrees[1].lockReason).toBe('working on hotfix');
     });
   });
 });
