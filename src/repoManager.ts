@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { isGitRepository, getGitRoot } from './gitHelper';
 
 export interface RepoInfo {
@@ -168,12 +169,12 @@ export class RepoManager implements vscode.Disposable {
   getRepoForFile(uri: vscode.Uri): string | undefined {
     let filePath = uri.fsPath;
     // Resolve symlinks so that symlinked workspace folders or files are correctly matched.
-    try { filePath = require('fs').realpathSync(filePath); } catch { /* file may not exist yet */ }
+    try { filePath = fs.realpathSync(filePath); } catch { /* file may not exist yet */ }
 
     let bestRoot: string | undefined;
     for (const repo of this._repos) {
       let repoRoot = repo.root;
-      try { repoRoot = require('fs').realpathSync(repoRoot); } catch { /* ignore */ }
+      try { repoRoot = fs.realpathSync(repoRoot); } catch { /* ignore */ }
 
       const rel = path.relative(repoRoot, filePath);
       if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {

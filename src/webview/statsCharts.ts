@@ -1,12 +1,13 @@
 import { elements } from './dom';
 import { escapeHtml, getAvatarColor, getInitials, fmtNum } from './utils/format';
 import { setRightPane } from './rightPane';
+import { CodeStats, DailyActivity, HourlyActivity } from './types';
 
 import { showAuthorDetail } from './authorDetail';
 import { reloadData } from './dataLoader';
 import { adjustSelectWidth } from './filters';
 
-function formatRangeLabel(since: string, until: string): string {
+function formatRangeLabel(since?: string, until?: string): string {
   if (!since && !until) return '';
   if (since === until || !until) {
     return since || '';
@@ -14,18 +15,18 @@ function formatRangeLabel(since: string, until: string): string {
   return `${since} → ${until}`;
 }
 
-export function renderStatsStrip(stats) {
+export function renderStatsStrip(stats: CodeStats) {
   if (!elements.statsStrip) return;
   elements.statsStrip.classList.remove('hidden');
   if (elements.stripCommitsVal) elements.stripCommitsVal.textContent = fmtNum(stats.totalCommits);
   if (elements.stripAdd) elements.stripAdd.textContent = '+' + fmtNum(stats.totalAdditions);
   if (elements.stripDel) elements.stripDel.textContent = '-' + fmtNum(stats.totalDeletions);
-  if (elements.stripContributorsVal) elements.stripContributorsVal.textContent = stats.contributors.length;
+  if (elements.stripContributorsVal) elements.stripContributorsVal.textContent = String(stats.contributors.length);
   const range = formatRangeLabel(stats.sinceDate, stats.untilDate);
   if (elements.stripRange) elements.stripRange.textContent = range;
 }
 
-export function renderOverviewStats(stats) {
+export function renderOverviewStats(stats: CodeStats) {
   // Range label
   const rangeLabel = formatRangeLabel(stats.sinceDate, stats.untilDate);
   elements.overviewRange.textContent = rangeLabel;
@@ -77,13 +78,13 @@ export function renderOverviewStats(stats) {
   renderTopFiles(elements.topFilesList, stats.topFiles);
 }
 
-export function renderActivityChart(activity: any[], mode: 'daily' | 'hourly' = 'daily') {
+export function renderActivityChart(activity: (DailyActivity | HourlyActivity)[], mode: 'daily' | 'hourly' = 'daily') {
   elements.activitySvg.innerHTML = '';
   if (!activity || activity.length === 0) return;
 
   const svgW = elements.activitySvg.clientWidth || 300;
   const svgH = 80;
-  elements.activitySvg.setAttribute('height', svgH);
+  elements.activitySvg.setAttribute('height', svgH.toString());
   elements.activitySvg.style.height = svgH + 'px';
 
   const padTop = 8;
@@ -100,12 +101,12 @@ export function renderActivityChart(activity: any[], mode: 'daily' | 'hourly' = 
   const pts = activity.map((d, i) => ({
     x: padLeft + (i / Math.max(n - 1, 1)) * chartW,
     y: padTop + chartH - (d.count / maxCount) * chartH,
-    label: mode === 'hourly' ? (d as any).label : (d as any).date,
+    label: mode === 'hourly' ? (d as HourlyActivity).label : (d as DailyActivity).date,
     count: d.count
   }));
 
   // Build smooth bezier path
-  function bezierPath(points) {
+  function bezierPath(points: { x: number; y: number }[]): string {
     if (points.length === 0) return '';
     if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
     let d = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
@@ -193,7 +194,8 @@ export function renderActivityChart(activity: any[], mode: 'daily' | 'hourly' = 
     // Month tick labels (daily mode)
     let lastMonth = '';
     pts.forEach((p, i) => {
-      const month = activity[i].date.substring(0, 7); // YYYY-MM
+      const dayItem = activity[i] as DailyActivity;
+      const month = dayItem.date.substring(0, 7); // YYYY-MM
       if (month !== lastMonth) {
         lastMonth = month;
         const label = document.createElementNS(ns, 'text');
@@ -287,8 +289,9 @@ export function renderActivityChart(activity: any[], mode: 'daily' | 'hourly' = 
 
     tooltip.style.display = 'block';
     if (mode === 'hourly') {
-      const endHour = String(d.hour + 1).padStart(2, '0');
-      tooltip.innerHTML = `<span style="opacity:0.7;font-size:12px;">${d.label} - ${endHour}:00</span><br><strong style="color:var(--vscode-editorHoverWidget-foreground);font-size:13px;font-weight:700;">${d.count}</strong> <span style="font-size:12px">次提交</span>`;
+      const hItem = d as HourlyActivity;
+      const endHour = String(hItem.hour + 1).padStart(2, '0');
+      tooltip.innerHTML = `<span style="opacity:0.7;font-size:12px;">${hItem.label} - ${endHour}:00</span><br><strong style="color:var(--vscode-editorHoverWidget-foreground);font-size:13px;font-weight:700;">${d.count}</strong> <span style="font-size:12px">次提交</span>`;
     } else {
       tooltip.innerHTML = `<span style="opacity:0.7;font-size:12px;">${p.label}</span><br><strong style="color:var(--vscode-editorHoverWidget-foreground);font-size:13px;font-weight:700;">${d.count}</strong> <span style="font-size:12px">次提交</span><br><span style="opacity:0.6;font-size:11px;">点击筛选此日</span>`;
     }
@@ -322,7 +325,7 @@ export function renderActivityChart(activity: any[], mode: 'daily' | 'hourly' = 
     const rect = elements.activitySvg.getBoundingClientRect();
     const mouseX = e.clientX - rect.left - padLeft;
     const idx = Math.max(0, Math.min(n - 1, Math.round((mouseX / chartW) * (n - 1))));
-    const d = activity[idx];
+    const d = activity[idx] as DailyActivity;
     if (!d || !d.date) return;
 
     // UI shows single selected day; getFilters() will automatically extend until by 1 day for git
@@ -345,22 +348,23 @@ export function renderActivityChart(activity: any[], mode: 'daily' | 'hourly' = 
   });
 }
 
-export function renderTopFiles(container, files) {
+export function renderTopFiles(container: HTMLElement, files: { path: string; changes?: number; count?: number }[]) {
   container.innerHTML = '';
   if (!files || files.length === 0) {
     container.innerHTML = '<div style="opacity:0.4;font-size:11px;padding:4px 8px;">暂无数据</div>';
     return;
   }
-  const maxChanges = files[0].changes;
+  const maxChanges = (files[0].changes ?? files[0].count) || 1;
   files.forEach(f => {
-    const pct = maxChanges > 0 ? Math.round((f.changes / maxChanges) * 100) : 0;
+    const changes = f.changes ?? f.count ?? 0;
+    const pct = maxChanges > 0 ? Math.round((changes / maxChanges) * 100) : 0;
     const row = document.createElement('div');
     row.className = 'top-file-row top-file-row-clickable';
     row.title = `${f.path}\n点击打开文件`;
     row.innerHTML = `
         <span class="top-file-name">${escapeHtml(f.path)}</span>
         <div class="top-file-bar-track"><div class="top-file-bar-fill" style="width:${pct}%;"></div></div>
-        <span class="top-file-count">${f.changes}次</span>
+        <span class="top-file-count">${changes}次</span>
         <i class="codicon codicon-go-to-file top-file-open-icon" title="打开文件"></i>
       `;
     row.addEventListener('click', () => {

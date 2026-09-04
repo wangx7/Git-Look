@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, toGitUri, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory, getWorkingTreeStatus, getWorktrees, WorktreeInfo } from '../gitHelper';
+import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory, getWorkingTreeStatus, getWorktrees, WorktreeInfo } from '../gitHelper';
 import { RepoManager } from '../repoManager';
+import { handleOpenDiff, handleOpenSingleDiff, handleOpenFileHistoryDiff, handleOpenAllDiffs } from './diffHelper';
 
 export interface IBlameManager {
   highlightCommitLines(editor: vscode.TextEditor, hash: string, color: string): void;
@@ -149,557 +150,43 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'loadData': {
-          this._setupGitWatcher(gitRoot);
-          const page = typeof data.page === 'number' ? data.page : 0;
-          if (page === 0) {
-            clearGitCache();
-          }
-          if (this._abortController) {
-            this._abortController.abort();
-          }
-          this._abortController = new AbortController();
-          const signal = this._abortController.signal;
-
-          try {
-            const pageSize = 150;
-            const skip = page * pageSize;
-
-            const [branches, remoteBranches, authors, commits, worktrees] = await Promise.all([
-              getBranches(gitRoot),
-              execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out =>
-                out.split('\n').map(b => b.trim()).filter(Boolean)
-              ).catch(() => []),
-              getAuthors(gitRoot, signal),
-              getCommits(gitRoot, data.filters || {}, skip, pageSize, signal),
-              getWorktrees(gitRoot, signal)
-            ]);
-
-            if (signal.aborted) {
-              return;
-            }
-
-            // Inject working tree virtual node on page 0 if not filtered out and working tree has modifications
-            if (page === 0) {
-              const filters = data.filters || {};
-              const hasStrictFilter = !!(filters.author || filters.since || filters.until || filters.query);
-              if (!hasStrictFilter) {
-                try {
-                  const wtStatus = await getWorkingTreeStatus(gitRoot, signal);
-                  if (wtStatus.hasChanges) {
-                    const headCommit = commits.find(c => c.decorations && c.decorations.some(d => d === 'HEAD' || d.startsWith('HEAD ->'))) || commits[0];
-                    const headHash = headCommit ? headCommit.hash : undefined;
-                    const parents = wtStatus.isMerging && wtStatus.mergeHeads.length > 0
-                      ? (headHash ? [headHash, ...wtStatus.mergeHeads] : wtStatus.mergeHeads)
-                      : (headHash ? [headHash] : []);
-                    const totalChanges = wtStatus.files.length;
-                    const summary = `未提交的修改 (${totalChanges} 个文件${wtStatus.isMerging ? ' · 合并冲突中' : ''})`;
-                    commits.unshift({
-                      hash: '*working-tree*',
-                      parents,
-                      author: 'You',
-                      email: '',
-                      timestamp: Math.floor(Date.now() / 1000),
-                      decorations: ['Working Tree'],
-                      message: summary
-                    });
-                  }
-                } catch {
-                  // Ignore working tree status errors
-                }
-              }
-            }
-
-            webviewView.webview.postMessage({
-              type: 'dataLoaded',
-              branches,
-              remoteBranches,
-              authors,
-              commits,
-              worktrees,
-              page
-            });
-          } catch (err: any) {
-            if (err.message === 'ABORTED' || (this._abortController && this._abortController.signal.aborted)) {
-              // Ignore aborted commands
-              return;
-            }
-            webviewView.webview.postMessage({
-              type: 'error',
-              error: err.message || '获取 Git 数据失败'
-          });
-          }
+          await this._handleLoadData(gitRoot, data, webviewView.webview);
           break;
         }
         case 'fetchRemote': {
-          // 从远程拉取所有分支：git fetch --all --prune
-          // 不动本地分支，只更新 refs/remotes/*；
-          // 关键：fetch 前后必须用包含 objectname 的格式比对，且 fetch 后立即 clearGitCache，
-          // 否则 execGit 的内存缓存会让 afterRefs 直接返回旧值，导致 changed 永远为 false
-          try {
-            // refname + objectname：分支名不变但 commit SHA 变了也能感知
-            const refFmt = ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/remotes/'];
-            const beforeRefs = (await execGit(refFmt, gitRoot)).trim();
-            await execGit(['fetch', '--all', '--prune'], gitRoot);
-            // fetch 后必须立即清缓存，避免 afterRefs 命中 fetch 前的缓存
-            clearGitCache();
-            const afterRefs = (await execGit(refFmt, gitRoot)).trim();
-            const changed = beforeRefs !== afterRefs;
-            webviewView.webview.postMessage({
-              type: 'fetchRemoteDone',
-              refresh: changed
-            });
-            if (changed) {
-              // watcher 也会触发，但有 300ms debounce；这里主动 refresh 让 UI 更新更及时
-              this.refresh();
-            }
-          } catch (err: any) {
-            // 失败也要清缓存，避免后续读到脏数据
-            clearGitCache();
-            webviewView.webview.postMessage({
-              type: 'fetchRemoteDone',
-              error: err.message || 'git fetch 失败'
-            });
-          }
+          await this._handleFetchRemote(gitRoot, webviewView.webview);
           break;
         }
         case 'locateCommit': {
-          try {
-            const { hash, filters } = data;
-
-            // 1. Try to find the commit using current filters
-            let result = await getCommitsUntil(gitRoot, filters || {}, hash, 3000);
-            let resetFilters = false;
-
-            // 2. If not found, try with empty/default filters (all branches, no author/date/query)
-            if (!result.found) {
-              result = await getCommitsUntil(gitRoot, {}, hash, 3000);
-              if (result.found) {
-                resetFilters = true;
-              }
-            }
-
-            if (result.found) {
-              // Get branches and authors to keep dropdowns in sync
-              const [branches, remoteBranches, authors] = await Promise.all([
-                getBranches(gitRoot),
-                execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot).then(out =>
-                  out.split('\n').map(b => b.trim()).filter(Boolean)
-                ).catch(() => []),
-                getAuthors(gitRoot)
-              ]); // locateCommit 不传 signal，使其能独立完成
-
-              webviewView.webview.postMessage({
-                type: 'commitLocated',
-                hash,
-                commits: result.commits,
-                branches,
-                remoteBranches,
-                authors,
-                resetFilters
-              });
-            } else {
-              webviewView.webview.postMessage({
-                type: 'error',
-                error: `在分支历史中未找到提交: ${hash.substring(0, 7)}`
-              });
-            }
-          } catch (err: any) {
-            webviewView.webview.postMessage({
-              type: 'error',
-              error: '定位提交失败: ' + err.message
-            });
-          }
+          await this._handleLocateCommit(gitRoot, data, webviewView.webview);
           break;
         }
         case 'getCommitDetail': {
-          try {
-            if (data.hash === '*working-tree*') {
-              const wtStatus = await getWorkingTreeStatus(gitRoot);
-              const files = wtStatus.files.map(f => ({
-                status: f.status,
-                path: f.path,
-                oldPath: f.oldPath,
-                additions: f.additions ?? 0,
-                deletions: f.deletions ?? 0,
-                staged: f.staged
-              }));
-
-              webviewView.webview.postMessage({
-                type: 'commitDetail',
-                hash: '*working-tree*',
-                files,
-                isWorkingTree: true
-              });
-              break;
-            }
-
-            // Get files changed in this commit including additions/deletions and handling merge commits (-m)
-            const [statusOut, numstatOut] = await Promise.all([
-              execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', '-m', '--root', data.hash], gitRoot),
-              execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', data.hash], gitRoot)
-            ]);
-
-            const fileStatusMap = new Map<string, string>();
-            statusOut.split('\n').filter(Boolean).forEach(line => {
-              const parts = line.split(/\s+/);
-              if (parts.length >= 2) {
-                fileStatusMap.set(parts[parts.length - 1], parts[0].charAt(0));
-              }
-            });
-
-            const filesMap = new Map<string, any>();
-            numstatOut.split('\n').filter(Boolean).forEach(line => {
-              const parts = line.split(/\t+/);
-              if (parts.length >= 3) {
-                const filePath = parts[2];
-                if (!filesMap.has(filePath)) {
-                  filesMap.set(filePath, {
-                    status: fileStatusMap.get(filePath) || 'M',
-                    path: filePath,
-                    additions: parts[0] === '-' ? 0 : parseInt(parts[0], 10),
-                    deletions: parts[1] === '-' ? 0 : parseInt(parts[1], 10)
-                  });
-                }
-              }
-            });
-
-            webviewView.webview.postMessage({
-              type: 'commitDetail',
-              hash: data.hash,
-              files: Array.from(filesMap.values())
-            });
-          } catch (err: any) {
-            webviewView.webview.postMessage({
-              type: 'error',
-              error: '获取提交详情失败: ' + err.message
-            });
-          }
+          await this._handleGetCommitDetail(gitRoot, data.hash, webviewView.webview);
           break;
         }
         case 'openDiff': {
-          const { hash } = data;
-          const file = (data.file || '').replace(/\\/g, '/');
-          let parentHash = data.parentHash;
-
-          if (hash === '*working-tree*') {
-            const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
-            const fileUri = vscode.Uri.file(absoluteFilePath);
-            const relativeFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
-
-            let leftUri: vscode.Uri;
-            try {
-              await execGit(['cat-file', '-e', `HEAD:${relativeFilePath}`], gitRoot);
-              leftUri = await toGitUri(fileUri, 'HEAD');
-            } catch {
-              leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-            }
-
-            const rightUri = fs.existsSync(absoluteFilePath)
-              ? fileUri
-              : vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-            const title = `${path.basename(file)} (HEAD vs 本地工作区)`;
-            await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
-            break;
-          }
-
-          try {
-            const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], gitRoot)).trim();
-            const parents = parentsStr ? parentsStr.split(/\s+/) : [];
-            if (parents.length > 0) {
-              // Check if file exists in the current commit
-              let existsInCurrent = false;
-              try {
-                await execGit(['cat-file', '-e', `${hash}:${file}`], gitRoot);
-                existsInCurrent = true;
-              } catch (e) {
-                // File does not exist in current commit (deleted)
-              }
-
-              if (existsInCurrent) {
-                // If it exists in the current commit, check if it exists in the primary parent
-                let existsInPrimaryParent = false;
-                try {
-                  await execGit(['cat-file', '-e', `${parents[0]}:${file}`], gitRoot);
-                  existsInPrimaryParent = true;
-                } catch (e) {
-                  // File does not exist in primary parent (added)
-                }
-
-                if (existsInPrimaryParent) {
-                  parentHash = parents[0];
-                } else {
-                  parentHash = 'empty';
-                }
-              } else {
-                // If it does not exist in current commit (deleted), find which parent contains it
-                let foundParent = '';
-                for (const parent of parents) {
-                  try {
-                    await execGit(['cat-file', '-e', `${parent}:${file}`], gitRoot);
-                    foundParent = parent;
-                    break;
-                  } catch (e) {
-                    // File does not exist in this parent
-                  }
-                }
-                parentHash = foundParent || 'empty';
-              }
-            }
-          } catch (e) {
-            // Ignore and fall back to default
-          }
-
-          const absoluteFilePath = path.join(gitRoot, file);
-          const fileUri = vscode.Uri.file(absoluteFilePath);
-          const relativeFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
-
-          let rightUri: vscode.Uri;
-          try {
-            await execGit(['cat-file', '-e', `${hash}:${relativeFilePath}`], gitRoot);
-            rightUri = await toGitUri(fileUri, hash);
-          } catch (e) {
-            rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-          }
-
-          let leftUri: vscode.Uri;
-          if (!parentHash || parentHash === 'empty') {
-            leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-          } else {
-            try {
-              await execGit(['cat-file', '-e', `${parentHash}:${relativeFilePath}`], gitRoot);
-              leftUri = await toGitUri(fileUri, parentHash);
-            } catch (e) {
-              leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-            }
-          }
-
-          const title = `${path.basename(file)} (${(parentHash && parentHash !== 'empty') ? parentHash.substring(0, 7) : 'empty'} vs ${hash.substring(0, 7)})`;
-
-          await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
-
+          await handleOpenDiff(gitRoot, data);
           break;
         }
         case 'openSingleDiff': {
-          const { hash, lineRange } = data;
-          const file = (data.file || '').replace(/\\/g, '/');
-          const oldFilePath = data.oldFilePath ? data.oldFilePath.replace(/\\/g, '/') : undefined;
-          const newFilePath = data.newFilePath ? data.newFilePath.replace(/\\/g, '/') : undefined;
-          let parentHash = data.parentHash;
-
-          const absoluteFilePath = path.isAbsolute(file) ? file : path.join(gitRoot, file);
-          const isWorkingTree = hash === 'HEAD';
-
-          let rightUri: vscode.Uri;
-          let leftUri: vscode.Uri;
-
-          // If we have exact historic paths from git log -L parsing, use them directly!
-          // This is highly optimized and perfectly handles file renames.
-          if (isWorkingTree) {
-            // 工作区未提交修改：若文件在磁盘存在，使用物理文件 URI 保证可编辑；若已删除，使用空文档
-            rightUri = fs.existsSync(absoluteFilePath)
-              ? vscode.Uri.file(absoluteFilePath)
-              : vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-          } else if (newFilePath) {
-            try {
-              await execGit(['cat-file', '-e', `${hash}:${newFilePath}`], gitRoot);
-              const newAbsPath = path.join(gitRoot, newFilePath);
-              rightUri = await toGitUri(vscode.Uri.file(newAbsPath), hash);
-            } catch (e) {
-              rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-            }
-          } else {
-            // Fallback to current relative path if historic paths are missing
-            const relativeFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
-            try {
-              await execGit(['cat-file', '-e', `${hash}:${relativeFilePath}`], gitRoot);
-              rightUri = await toGitUri(vscode.Uri.file(absoluteFilePath), hash);
-            } catch (e) {
-              rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-            }
-          }
-
-          let resolvedParentHash = parentHash;
-          if (parentHash && parentHash !== 'empty') {
-            if (oldFilePath) {
-              try {
-                await execGit(['cat-file', '-e', `${parentHash}:${oldFilePath}`], gitRoot);
-              } catch (e) {
-                resolvedParentHash = 'empty';
-              }
-            } else {
-               const relativeFilePath = path.relative(gitRoot, absoluteFilePath).replace(/\\/g, '/');
-               try {
-                 await execGit(['cat-file', '-e', `${parentHash}:${relativeFilePath}`], gitRoot);
-               } catch (e) {
-                 resolvedParentHash = 'empty';
-                 try {
-                   const parentsStr = (await execGit(['show', '--pretty=format:%P', '-s', hash], gitRoot)).trim();
-                   const parents = parentsStr ? parentsStr.split(/\s+/) : [];
-                   for (const p of parents) {
-                     try {
-                       await execGit(['cat-file', '-e', `${p}:${relativeFilePath}`], gitRoot);
-                       resolvedParentHash = p;
-                       break;
-                     } catch (err) {}
-                   }
-                 } catch (err) {}
-               }
-            }
-          }
-
-          if (!resolvedParentHash || resolvedParentHash === 'empty') {
-            leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-          } else {
-            if (oldFilePath) {
-              const oldAbsPath = path.join(gitRoot, oldFilePath);
-              leftUri = await toGitUri(vscode.Uri.file(oldAbsPath), resolvedParentHash);
-            } else {
-              leftUri = await toGitUri(vscode.Uri.file(absoluteFilePath), resolvedParentHash);
-            }
-          }
-
-          const rightLabel = isWorkingTree ? '本地工作区' : hash.substring(0, 7);
-          const title = `${path.basename(file)} (${(resolvedParentHash && resolvedParentHash !== 'empty') ? resolvedParentHash.substring(0, 7) : 'empty'} vs ${rightLabel})`;
-
-          let options: vscode.TextDocumentShowOptions = {};
-          if (lineRange) {
-            const startLine = Math.max(0, lineRange.newStart - 1);
-            const endLine = Math.max(0, startLine + Math.max(0, lineRange.newLength - 1));
-            options.selection = new vscode.Range(startLine, 0, endLine, 0);
-          }
-
-          await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title, options);
-
+          await handleOpenSingleDiff(gitRoot, data);
           break;
         }
         case 'openFileHistoryDiff': {
-          const { file, hash, parentHash, oldFilePath, newFilePath } = data;
-          // file is already repo-relative path from file history
-          const relativeFilePath = path.isAbsolute(file) ? path.relative(gitRoot, file).replace(/\\/g, '/') : file;
-          const absoluteFilePath = path.join(gitRoot, relativeFilePath);
-
-          let leftUri: vscode.Uri;
-          // Left side: the historical commit user selected
-          const relativeHistPath = oldFilePath || newFilePath || relativeFilePath;
-          try {
-            await execGit(['cat-file', '-e', `${hash}:${relativeHistPath}`], gitRoot);
-            leftUri = await toGitUri(vscode.Uri.file(path.join(gitRoot, relativeHistPath)), hash);
-          } catch (e) {
-            try {
-              await execGit(['cat-file', '-e', `${hash}:${relativeFilePath}`], gitRoot);
-              leftUri = await toGitUri(vscode.Uri.file(absoluteFilePath), hash);
-            } catch (e2) {
-              leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-            }
-          }
-
-          // Right side: current working tree (use physical file URI when existing, matching native VS Code diff)
-          const rightUri = fs.existsSync(absoluteFilePath)
-            ? vscode.Uri.file(absoluteFilePath)
-            : vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-
-          const title = `${path.basename(relativeFilePath)} (${hash.substring(0, 7)} vs 本地工作区)`;
-
-          await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+          await handleOpenFileHistoryDiff(gitRoot, data);
           break;
         }
         case 'openWorkspaceFile': {
-          const { file, hash } = data;
-          // If no hash provided (e.g. from top-files list), open the workspace file directly
-          if (!hash) {
-            const fullPath = path.join(gitRoot, file);
-            const fileUri = vscode.Uri.file(fullPath);
-            try {
-              await vscode.commands.executeCommand('vscode.open', fileUri);
-            } catch (err: any) {
-              vscode.window.showWarningMessage(`无法打开文件: ${err.message}`);
-            }
-            break;
-          }
-          // Otherwise open via the registered command (supports git-blame status bar integration)
-          const uri = vscode.Uri.from({
-            scheme: 'git-visual',
-            authority: 'empty',
-            path: file.startsWith('/') ? file : '/' + file
-          });
-          await vscode.commands.executeCommand('git-visual.openWorkspaceFile', uri);
+          await this._handleOpenWorkspaceFile(gitRoot, data);
           break;
         }
         case 'getStats': {
-          // Use a SEPARATE abort controller — never touch _abortController (used by loadData)
-          if (this._statsAbortController) {
-            this._statsAbortController.abort();
-          }
-          this._statsAbortController = new AbortController();
-          const statsSignal = this._statsAbortController.signal;
-          try {
-            const stats = await getCodeStats(gitRoot, data.filters || {}, statsSignal);
-            if (statsSignal.aborted) { return; }
-            webviewView.webview.postMessage({ type: 'statsLoaded', stats });
-          } catch (err: any) {
-            if (err.message === 'ABORTED') { return; }
-            webviewView.webview.postMessage({ type: 'statsError', error: err.message });
-          }
+          await this._handleGetStats(gitRoot, data, webviewView.webview);
           break;
         }
         case 'openAllDiffs': {
-          try {
-            const { hash, files, parentHash, message } = data;
-            const isWorkingTree = (hash === '*working-tree*');
-            const resourceList = await Promise.all(files.map(async (f: any) => {
-              const absoluteFilePath = path.join(gitRoot, f.path);
-              const fileUri = vscode.Uri.file(absoluteFilePath);
-              
-              let leftUri: vscode.Uri;
-              if (isWorkingTree) {
-                if (f.status === 'A' || f.status === '?') {
-                  leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-                } else {
-                  try {
-                    await execGit(['cat-file', '-e', `HEAD:${f.path}`], gitRoot);
-                    leftUri = await toGitUri(fileUri, 'HEAD');
-                  } catch {
-                    leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-                  }
-                }
-              } else {
-                if (f.status === 'A' || !parentHash || parentHash === 'empty') {
-                  leftUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-                } else {
-                  leftUri = await toGitUri(fileUri, parentHash);
-                }
-              }
-
-              let rightUri: vscode.Uri;
-              if (isWorkingTree) {
-                if (f.status === 'D' || !fs.existsSync(absoluteFilePath)) {
-                  rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-                } else {
-                  rightUri = fileUri;
-                }
-              } else {
-                if (f.status === 'D') {
-                  rightUri = vscode.Uri.from({ scheme: 'git-visual', path: absoluteFilePath });
-                } else {
-                  rightUri = await toGitUri(fileUri, hash);
-                }
-              }
-
-              // vscode.changes expects [labelUri, leftUri, rightUri]:
-              // - labelUri (index 0): used for the tab title / file name display
-              // - leftUri  (index 1): original (parent/older) side
-              // - rightUri (index 2): modified (newer) side
-              return [fileUri, leftUri, rightUri];
-            }));
-            const title = isWorkingTree
-              ? `工作区未提交修改 (${files.length} 个文件)`
-              : `${hash.substring(0, 7)} - ${message || ''} (${files.length} 个文件)`;
-            console.log(`[Git 可视化] openAllDiffs: opening ${resourceList.length} changes with title "${title}"`);
-            await vscode.commands.executeCommand('vscode.changes', title, resourceList);
-          } catch (e: any) {
-            vscode.window.showErrorMessage(`无法打开多文件对比: ${e.message}`);
-            console.error('Error in openAllDiffs:', e);
-          }
+          await handleOpenAllDiffs(gitRoot, data);
           break;
         }
         case 'hoverBlameCommit': {
@@ -729,6 +216,259 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         }
       }
     });
+  }
+
+  private async _handleLoadData(gitRoot: string, data: any, webview: vscode.Webview): Promise<void> {
+    this._setupGitWatcher(gitRoot);
+    const page = typeof data.page === 'number' ? data.page : 0;
+    if (page === 0) {
+      clearGitCache();
+    }
+    if (this._abortController) {
+      this._abortController.abort();
+    }
+    this._abortController = new AbortController();
+    const signal = this._abortController.signal;
+
+    try {
+      const pageSize = 150;
+      const skip = page * pageSize;
+
+      const [branches, remoteBranches, authors, commits, worktrees] = await Promise.all([
+        getBranches(gitRoot),
+        execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out =>
+          out.split('\n').map(b => b.trim()).filter(Boolean)
+        ).catch(() => []),
+        getAuthors(gitRoot, signal),
+        getCommits(gitRoot, data.filters || {}, skip, pageSize, signal),
+        getWorktrees(gitRoot, signal)
+      ]);
+
+      if (signal.aborted) {
+        return;
+      }
+
+      // Inject working tree virtual node on page 0 if not filtered out and working tree has modifications
+      if (page === 0) {
+        const filters = data.filters || {};
+        const hasStrictFilter = !!(filters.author || filters.since || filters.until || filters.query);
+        if (!hasStrictFilter) {
+          try {
+            const wtStatus = await getWorkingTreeStatus(gitRoot, signal);
+            if (wtStatus.hasChanges) {
+              const headCommit = commits.find(c => c.decorations && c.decorations.some(d => d === 'HEAD' || d.startsWith('HEAD ->'))) || commits[0];
+              const headHash = headCommit ? headCommit.hash : undefined;
+              const parents = wtStatus.isMerging && wtStatus.mergeHeads.length > 0
+                ? (headHash ? [headHash, ...wtStatus.mergeHeads] : wtStatus.mergeHeads)
+                : (headHash ? [headHash] : []);
+              const totalChanges = wtStatus.files.length;
+              const summary = `未提交的修改 (${totalChanges} 个文件${wtStatus.isMerging ? ' · 合并冲突中' : ''})`;
+              commits.unshift({
+                hash: '*working-tree*',
+                parents,
+                author: 'You',
+                email: '',
+                timestamp: Math.floor(Date.now() / 1000),
+                decorations: ['Working Tree'],
+                message: summary
+              });
+            }
+          } catch {
+            // Ignore working tree status errors
+          }
+        }
+      }
+
+      webview.postMessage({
+        type: 'dataLoaded',
+        branches,
+        remoteBranches,
+        authors,
+        commits,
+        worktrees,
+        page
+      });
+    } catch (err: any) {
+      if (err.message === 'ABORTED' || (this._abortController && this._abortController.signal.aborted)) {
+        return;
+      }
+      webview.postMessage({
+        type: 'error',
+        error: err.message || '获取 Git 数据失败'
+      });
+    }
+  }
+
+  private async _handleFetchRemote(gitRoot: string, webview: vscode.Webview): Promise<void> {
+    try {
+      const refFmt = ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/remotes/'];
+      const beforeRefs = (await execGit(refFmt, gitRoot)).trim();
+      await execGit(['fetch', '--all', '--prune'], gitRoot);
+      clearGitCache();
+      const afterRefs = (await execGit(refFmt, gitRoot)).trim();
+      const changed = beforeRefs !== afterRefs;
+      webview.postMessage({
+        type: 'fetchRemoteDone',
+        refresh: changed
+      });
+      if (changed) {
+        this.refresh();
+      }
+    } catch (err: any) {
+      clearGitCache();
+      webview.postMessage({
+        type: 'fetchRemoteDone',
+        error: err.message || 'git fetch 失败'
+      });
+    }
+  }
+
+  private async _handleLocateCommit(gitRoot: string, data: any, webview: vscode.Webview): Promise<void> {
+    try {
+      const { hash, filters } = data;
+
+      // 1. Try to find the commit using current filters
+      let result = await getCommitsUntil(gitRoot, filters || {}, hash, 3000);
+      let resetFilters = false;
+
+      // 2. If not found, try with empty/default filters (all branches, no author/date/query)
+      if (!result.found) {
+        result = await getCommitsUntil(gitRoot, {}, hash, 3000);
+        if (result.found) {
+          resetFilters = true;
+        }
+      }
+
+      if (result.found) {
+        const [branches, remoteBranches, authors] = await Promise.all([
+          getBranches(gitRoot),
+          execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot).then(out =>
+            out.split('\n').map(b => b.trim()).filter(Boolean)
+          ).catch(() => []),
+          getAuthors(gitRoot)
+        ]);
+
+        webview.postMessage({
+          type: 'commitLocated',
+          hash,
+          commits: result.commits,
+          branches,
+          remoteBranches,
+          authors,
+          resetFilters
+        });
+      } else {
+        webview.postMessage({
+          type: 'error',
+          error: `在分支历史中未找到提交: ${hash.substring(0, 7)}`
+        });
+      }
+    } catch (err: any) {
+      webview.postMessage({
+        type: 'error',
+        error: '定位提交失败: ' + err.message
+      });
+    }
+  }
+
+  private async _handleGetCommitDetail(gitRoot: string, hash: string, webview: vscode.Webview): Promise<void> {
+    try {
+      if (hash === '*working-tree*') {
+        const wtStatus = await getWorkingTreeStatus(gitRoot);
+        const files = wtStatus.files.map(f => ({
+          status: f.status,
+          path: f.path,
+          oldPath: f.oldPath,
+          additions: f.additions ?? 0,
+          deletions: f.deletions ?? 0,
+          staged: f.staged
+        }));
+
+        webview.postMessage({
+          type: 'commitDetail',
+          hash: '*working-tree*',
+          files,
+          isWorkingTree: true
+        });
+        return;
+      }
+
+      const [statusOut, numstatOut] = await Promise.all([
+        execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', '-m', '--root', hash], gitRoot),
+        execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', hash], gitRoot)
+      ]);
+
+      const fileStatusMap = new Map<string, string>();
+      statusOut.split('\n').filter(Boolean).forEach(line => {
+        const parts = line.split(/\s+/);
+        if (parts.length >= 2) {
+          fileStatusMap.set(parts[parts.length - 1], parts[0].charAt(0));
+        }
+      });
+
+      const filesMap = new Map<string, any>();
+      numstatOut.split('\n').filter(Boolean).forEach(line => {
+        const parts = line.split(/\t+/);
+        if (parts.length >= 3) {
+          const filePath = parts[2];
+          if (!filesMap.has(filePath)) {
+            filesMap.set(filePath, {
+              status: fileStatusMap.get(filePath) || 'M',
+              path: filePath,
+              additions: parts[0] === '-' ? 0 : parseInt(parts[0], 10),
+              deletions: parts[1] === '-' ? 0 : parseInt(parts[1], 10)
+            });
+          }
+        }
+      });
+
+      webview.postMessage({
+        type: 'commitDetail',
+        hash,
+        files: Array.from(filesMap.values())
+      });
+    } catch (err: any) {
+      webview.postMessage({
+        type: 'error',
+        error: '获取提交详情失败: ' + err.message
+      });
+    }
+  }
+
+  private async _handleOpenWorkspaceFile(gitRoot: string, data: any): Promise<void> {
+    const { file, hash } = data;
+    if (!hash) {
+      const fullPath = path.join(gitRoot, file);
+      const fileUri = vscode.Uri.file(fullPath);
+      try {
+        await vscode.commands.executeCommand('vscode.open', fileUri);
+      } catch (err: any) {
+        vscode.window.showWarningMessage(`无法打开文件: ${err.message}`);
+      }
+      return;
+    }
+    const uri = vscode.Uri.from({
+      scheme: 'git-visual',
+      authority: 'empty',
+      path: file.startsWith('/') ? file : '/' + file
+    });
+    await vscode.commands.executeCommand('git-visual.openWorkspaceFile', uri);
+  }
+
+  private async _handleGetStats(gitRoot: string, data: any, webview: vscode.Webview): Promise<void> {
+    if (this._statsAbortController) {
+      this._statsAbortController.abort();
+    }
+    this._statsAbortController = new AbortController();
+    const statsSignal = this._statsAbortController.signal;
+    try {
+      const stats = await getCodeStats(gitRoot, data.filters || {}, statsSignal);
+      if (statsSignal.aborted) { return; }
+      webview.postMessage({ type: 'statsLoaded', stats });
+    } catch (err: any) {
+      if (err.message === 'ABORTED') { return; }
+      webview.postMessage({ type: 'statsError', error: err.message });
+    }
   }
 
   private _getHtmlForWebview(webview: vscode.Webview): string {

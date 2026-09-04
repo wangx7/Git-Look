@@ -33,6 +33,8 @@ export interface ContributorStats {
   commits: number;
   additions: number;
   deletions: number;
+  totalChanged?: number;
+  weekdayDistribution?: number[];
   topFiles?: any[];
 }
 

@@ -7,6 +7,30 @@ const rowHeight = constants.rowHeight;
 const laneWidth = constants.laneWidth;
 const paddingLeft = constants.paddingLeft;
 
+let isGraphEventsInitialized = false;
+
+export function initGraphEvents() {
+  if (isGraphEventsInitialized || !elements.graphSvg || !elements.graphSvg.addEventListener) return;
+  isGraphEventsInitialized = true;
+
+  elements.graphSvg.addEventListener('mouseover', (e: Event) => {
+    const target = (e.target as Element)?.closest?.('[data-branch-id]');
+    if (target) {
+      const branchId = parseInt(target.getAttribute('data-branch-id') || '', 10);
+      if (!isNaN(branchId)) {
+        highlightLane(branchId);
+      }
+    }
+  });
+
+  elements.graphSvg.addEventListener('mouseout', (e: Event) => {
+    const target = (e.target as Element)?.closest?.('[data-branch-id]');
+    if (target) {
+      clearLaneHighlight();
+    }
+  });
+}
+
 export function highlightLane(branchId: number) {
   elements.graphSvg.classList.add('hover-active');
   elements.graphSvg.querySelectorAll(`.lane-path-${branchId}`).forEach(p => p.classList.add('hovered-lane-path'));
@@ -20,12 +44,13 @@ export function clearLaneHighlight() {
 }
 
 export function drawSvg(startIndex: number, endIndex: number) {
+  initGraphEvents();
   elements.graphSvg.innerHTML = '';
 
   // Clear hover state to prevent stuck dimming when SVG re-renders (e.g. on click)
   elements.graphSvg.classList.remove('hover-active');
 
-  function getBranchColor(branchId) {
+  function getBranchColor(branchId: number) {
     if (branchId < colors.length) {
       return colors[branchId];
     }
@@ -115,6 +140,7 @@ export function drawSvg(startIndex: number, endIndex: number) {
   pathGroups.forEach(group => {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('class', `lane-path-${group.branchId}`);
+    path.setAttribute('data-branch-id', group.branchId.toString());
     path.setAttribute('d', group.d);
     path.setAttribute('stroke', group.color);
     path.setAttribute('stroke-width', group.strokeWidth.toString());
@@ -122,9 +148,6 @@ export function drawSvg(startIndex: number, endIndex: number) {
     if (group.isDotted) {
       path.setAttribute('stroke-dasharray', '4,3');
     }
-
-    path.addEventListener('mouseover', () => highlightLane(group.branchId));
-    path.addEventListener('mouseout', clearLaneHighlight);
 
     elements.graphSvg.appendChild(path);
   });
@@ -144,6 +167,7 @@ export function drawSvg(startIndex: number, endIndex: number) {
     if (c.hash === '*working-tree*') {
       const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       group.setAttribute('class', `node-group-${c.hash}`);
+      group.setAttribute('data-branch-id', branchId.toString());
 
       const outer = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       outer.setAttribute('class', `node-${c.hash} lane-node-${branchId} working-tree-node${isSelected ? ' selected' : ''}`);
@@ -165,13 +189,11 @@ export function drawSvg(startIndex: number, endIndex: number) {
       group.appendChild(outer);
       group.appendChild(inner);
 
-      group.addEventListener('mouseover', () => highlightLane(branchId));
-      group.addEventListener('mouseout', clearLaneHighlight);
-
       elements.graphSvg.appendChild(group);
     } else if (node.isMerge) {
       const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       group.setAttribute('class', `node-group-${c.hash}`);
+      group.setAttribute('data-branch-id', branchId.toString());
 
       const outer = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       outer.setAttribute('class', `node-${c.hash} lane-node-${branchId} merge-outer${isSelected ? ' selected' : ''}`);
@@ -192,22 +214,17 @@ export function drawSvg(startIndex: number, endIndex: number) {
       group.appendChild(outer);
       group.appendChild(inner);
 
-      group.addEventListener('mouseover', () => highlightLane(branchId));
-      group.addEventListener('mouseout', clearLaneHighlight);
-
       elements.graphSvg.appendChild(group);
     } else {
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       circle.setAttribute('class', `node-${c.hash} lane-node-${branchId}${isSelected ? ' selected' : ''}`);
+      circle.setAttribute('data-branch-id', branchId.toString());
       circle.setAttribute('cx', String(x));
       circle.setAttribute('cy', String(y));
       circle.setAttribute('r', isSelected ? '5' : '4.5');
       circle.setAttribute('fill', color);
       circle.setAttribute('stroke', 'var(--bg-color)');
       circle.setAttribute('stroke-width', '1.5');
-
-      circle.addEventListener('mouseover', () => highlightLane(branchId));
-      circle.addEventListener('mouseout', clearLaneHighlight);
 
       elements.graphSvg.appendChild(circle);
     }
