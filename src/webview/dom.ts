@@ -11,7 +11,6 @@ export const elements = {
   searchInput: document.getElementById('search-input') as HTMLInputElement,
   resetBtn: document.getElementById('reset-btn') as HTMLButtonElement,
   fetchBtn: document.getElementById('fetch-btn') as HTMLButtonElement,
-  firstParentBtn: document.getElementById('first-parent-btn') as HTMLButtonElement,
   toggleDetailsBtn: document.getElementById('toggle-details-btn') as HTMLButtonElement,
   loadingOverlay: document.getElementById('loading') as HTMLElement,
   errorBanner: document.getElementById('error-message') as HTMLElement,

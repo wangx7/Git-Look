@@ -6,7 +6,7 @@ import { initFilters, updateFilterControls, getFilters, adjustSelectWidth } from
 import { reloadData, requestStats, saveCurrentState, loadNextPage } from './dataLoader';
 import { renderTableAndGraph } from './graphLayout';
 import { updateVirtualList, initVirtualListEvents } from './virtualList';
-import { handleRowClick, onRequestVirtualListUpdate } from './commitDetail';
+import { handleRowClick, onRequestVirtualListUpdate, refreshCommitDetailView } from './commitDetail';
 import { initLayout } from './layout';
 import { initMessageHandler } from './messageHandler';
 import { constants } from './constants';
@@ -33,6 +33,11 @@ function init() {
   onRightPaneStateChange(saveCurrentState);
   onRequestVirtualListUpdate(updateVirtualList);
   initCommitTooltip(elements.commitsTbody, elements.tableContainer);
+
+  window.addEventListener('commitTooltipViewToggle', (event: Event) => {
+    const hash = (event as CustomEvent<{ hash: string }>).detail?.hash;
+    if (hash) refreshCommitDetailView(hash);
+  });
 
   // Repo selector: send switchRepo when user picks a different repo
   if (elements.repoSelect) {

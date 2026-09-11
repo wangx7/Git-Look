@@ -20,6 +20,12 @@ export function onRequestVirtualListUpdate(callback: () => void) {
   requestVirtualListUpdate = callback;
 }
 
+export function refreshCommitDetailView(hash: string): void {
+  if (state.selectedCommitHash !== hash || currentCommitHash !== hash) return;
+  saveCurrentState();
+  renderCommitDetail(hash, currentCommitFiles);
+}
+
 const rowHeight = constants.rowHeight;
 
 export function handleRowClick(row, hash, parents) {

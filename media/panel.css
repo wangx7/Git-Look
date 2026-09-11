@@ -301,10 +301,9 @@ body.vscode-high-contrast .filter-group input[type="date"] {
   pointer-events: auto;
 }
 
-/* Reset, Fetch and First-Parent buttons */
+/* Reset and Fetch buttons */
 #reset-btn,
-#fetch-btn,
-#first-parent-btn {
+#fetch-btn {
   height: 26px;
   width: 26px;
   padding: 0;
@@ -324,16 +323,9 @@ body.vscode-high-contrast .filter-group input[type="date"] {
 
 #reset-btn:hover,
 #fetch-btn:hover,
-#first-parent-btn:hover,
 #fetch-btn.fetching {
   background-color: var(--row-hover-bg);
   color: var(--fg-color);
-}
-
-#first-parent-btn.active {
-  background-color: var(--accent);
-  color: #ffffff;
-  border-color: var(--accent);
 }
 
 /* fetch 进行中：图标旋转 + 禁用点击 */
@@ -2814,20 +2806,57 @@ svg#graph-svg .merge-inner.hovered {
 .commit-hover-popover {
   position: fixed;
   z-index: 9999;
-  max-width: 520px;
-  min-width: 260px;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow-y: auto;
   background-color: var(--vscode-editorHoverWidget-background, var(--surface-1));
   color: var(--vscode-editorHoverWidget-foreground, var(--fg-color));
   border: 1px solid var(--vscode-editorHoverWidget-border, var(--border-color));
   border-radius: var(--radius-md, 7px);
-  padding: 10px 14px;
+  padding: 12px 14px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.38), 0 0 0 1px var(--border-subtle);
-  pointer-events: none;
+  pointer-events: auto;
   opacity: 0;
   transform: translateY(3px);
   transition: opacity 0.14s ease, transform 0.14s ease;
   font-family: var(--font-family);
   user-select: none;
+}
+
+.commit-hover-popover .commit-info-card {
+  margin-top: 0;
+}
+
+.commit-hover-stats {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.commit-hover-stats-loading {
+  display: block;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+
+.commit-hover-stats .details-stats-toolbar {
+  min-height: 24px;
+}
+
+.commit-hover-popover .detail-author-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  text-transform: uppercase;
 }
 
 .commit-hover-popover.visible {

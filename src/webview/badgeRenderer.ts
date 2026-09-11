@@ -126,8 +126,7 @@ export function renderInlineBadges(commit: any, maxBadges: number = 2): string {
 }
 
 /**
- * Render branch/tag/remote badges into the detail panel's container element.
- * Also shows inferred lane branch if not already in decorations.
+ * Render only authoritative Git decorations into the detail panel.
  */
 export function renderDetailBadges(commit: any, hash: string, container: HTMLElement): void {
   const renderedBadges: string[] = [];
@@ -138,21 +137,6 @@ export function renderDetailBadges(commit: any, hash: string, container: HTMLEle
     });
   }
 
-  // Append inferred lane branch only if no corresponding branch decoration is already shown
-  const laneBranch = state.commitBranchLabel[hash];
-  if (laneBranch && laneBranch.name && laneBranch.name !== 'Working Tree') {
-    const isAlreadyShown = commit && commit.decorations && commit.decorations.some((d: string) => {
-      if (d === laneBranch.name) return true;
-      if (d.replace(/^origin\//, '') === laneBranch.name) return true;
-      if (d.replace(/^refs\/remotes\/[^/]+\//, '') === laneBranch.name) return true;
-      if (d.startsWith('tag: ') && d.substring(5) === laneBranch.name) return true;
-      return false;
-    });
-
-    if (!isAlreadyShown) {
-      renderedBadges.push(makeBadgeHtml(laneBranch.name, undefined, laneBranch.color));
-    }
-  }
 
   if (renderedBadges.length > 0) {
     container.innerHTML = renderedBadges.join('');

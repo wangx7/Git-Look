@@ -1,4 +1,5 @@
 import { Commit, CodeStats, WebviewState, RightPaneState, RightPaneStateType, Filters, RepoInfo, WorktreeInfo } from './types';
+import { GraphLayoutResult, GraphNode, GraphSegment } from './graph/types';
 
 export class StateManager {
   commits: Commit[] = [];
@@ -9,8 +10,9 @@ export class StateManager {
   selectedCommitHash: string | null = null;
   expandedRow: string | null = null;
   currentGraphWidth: number = 120;
-  cachedLines: any[] = [];
-  cachedCommitNodes: Record<string, any> = {};
+  graphLayout: GraphLayoutResult | null = null;
+  cachedLines: GraphSegment[] = [];
+  cachedCommitNodes: Record<string, GraphNode> = {};
   branchColorMap: Map<string, string> = new Map();
   currentStatsData: CodeStats | null = null;
   currentFocusedAuthor: string | null = null;
@@ -27,7 +29,6 @@ export class StateManager {
   repos: RepoInfo[] = [];
   selectedRepoIndex: number = 0;
   commitDetailViewMode: 'tree' | 'list' = 'tree';
-  firstParentOnly: boolean = false;
 
   getRightPaneStateNumber(): number {
     if (this.rightPaneVisible === 0) {

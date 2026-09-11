@@ -73,8 +73,8 @@ describe('commitTooltip', () => {
     expect(mockPopover.innerHTML).toContain('Alice');
     expect(mockPopover.innerHTML).toContain('main');
     expect(mockPopover.classList.add).toHaveBeenCalledWith('visible');
-    expect(mockPopover.style.left).toBe('112px');
-    expect(mockPopover.style.top).toBe('216px');
+    expect(mockPopover.style.left).toBe('104px');
+    expect(mockPopover.style.top).toBe('204px');
   });
 
   it('hides tooltip properly', () => {
@@ -100,11 +100,7 @@ describe('commitTooltip', () => {
     expect(document.addEventListener).toHaveBeenCalledWith('click', expect.any(Function));
   });
 
-  it('renders inferred lane branch in tooltip when commit has no decorations', () => {
-    state.commitBranchLabel['hash93bba8e'] = {
-      name: 'fix/http-proxy-rc-version',
-      color: '#10b981'
-    };
+  it('renders only commit info and no badges in tooltip when commit has no decorations', () => {
     const commit = {
       hash: 'hash93bba8e',
       parents: ['parent1'],
@@ -116,7 +112,8 @@ describe('commitTooltip', () => {
     };
 
     showCommitTooltip(commit, 100, 200);
-    expect(mockPopover.innerHTML).toContain('fix/http-proxy-rc-version');
-    expect(mockPopover.innerHTML).toContain('#10b981');
+    expect(mockPopover.innerHTML).toContain('hash93b');
+    expect(mockPopover.innerHTML).toContain('fix(http-proxy): withhold NODE_USE_ENV_PROXY');
+    expect(mockPopover.innerHTML).not.toContain('ref-badge');
   });
 });

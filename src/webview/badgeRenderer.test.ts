@@ -139,27 +139,17 @@ describe('badgeRenderer', () => {
       expect(mockContainer.classList.contains('hidden')).toBe(false);
     });
 
-    it('does not duplicate inferred lane branch if origin/remote already exists', () => {
-      state.commitBranchLabel['hash123'] = { name: 'feature-abc', color: '#ff0000' };
+    it('renders authoritative decorations in detail panel', () => {
       const commit = {
         decorations: ['origin/feature-abc']
       };
       renderDetailBadges(commit, 'hash123', mockContainer);
       expect(mockContainer.innerHTML).toContain('origin/feature-abc');
-      // Should only contain 1 badge and not duplicate feature-abc
       const matches = mockContainer.innerHTML.match(/feature-abc/g);
       expect(matches?.length).toBe(2); // One in title attribute, one in span text of the single badge
     });
 
-    it('renders inferred lane branch if commit has no decorations', () => {
-      state.commitBranchLabel['hash123'] = { name: 'feature-xyz', color: '#00ff00' };
-      const commit = { decorations: [] };
-      renderDetailBadges(commit, 'hash123', mockContainer);
-      expect(mockContainer.innerHTML).toContain('feature-xyz');
-      expect(mockContainer.classList.contains('hidden')).toBe(false);
-    });
-
-    it('hides container when no badges exist and no lane branch', () => {
+    it('does not render inferred lane branch when commit has no decorations', () => {
       const commit = { decorations: [] };
       renderDetailBadges(commit, 'hash123', mockContainer);
       expect(mockContainer.innerHTML).toBe('');

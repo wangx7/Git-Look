@@ -14,6 +14,7 @@ import { RightPaneState } from './types';
 import { showAuthorDetail } from './authorDetail';
 import { updateVirtualList } from './virtualList';
 import { updateRepoSelector, showEmptyState, hideEmptyState, updateRepoSelectorVisibility } from './repoSelector';
+import { renderCommitTooltipFiles } from './commitTooltip';
 
 export function initMessageHandler() {
   window.addEventListener('message', event => {
@@ -101,6 +102,7 @@ export function initMessageHandler() {
         break;
       }
       case 'commitDetail':
+        renderCommitTooltipFiles(message.hash, message.files);
         renderCommitDetail(message.hash, message.files);
         break;
       case 'showHistory':

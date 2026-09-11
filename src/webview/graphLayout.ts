@@ -1,15 +1,12 @@
 import { state } from './state';
 import { elements } from './dom';
-import { colors, getRelativeTime, formatDate, escapeHtml, hexToRgba, getAvatarColor, getInitials, fmtNum } from './utils/format';
-import { RightPaneState } from './types';
-import { getFileIconInfo } from './utils/fileIcons';
+import { colors } from './utils/format';
 import { constants } from './constants';
-import { setRightPane, setRightPaneVisible, ensureDetailsExpanded } from './rightPane';
-import { requestStats, hideLoading, showLoading } from './dataLoader';
-
 import { updateVirtualList } from './virtualList';
 import { selectCircleInGraph } from './svgRenderer';
 import { MinHeap } from '../utils/minHeap';
+import { layoutGitGraph } from './graph/layout';
+import { GraphNode } from './graph/types';
 
 const rowHeight = constants.rowHeight;
 const laneWidth = constants.laneWidth;
@@ -368,7 +365,7 @@ export function renderTableAndGraph() {
     return;
   }
 
-  // ─── 1. 图表 Lane 分配算法（防重叠新版）─────────
+  // ─── 1. 纯函数 Graph Engine 计算 DAG 布局 ─────────
 
   const isFiltered = !!(
     (elements.authorSelect && elements.authorSelect.value) ||
@@ -379,287 +376,41 @@ export function renderTableAndGraph() {
   );
   const shouldDrawToBottom = state.hasMoreCommits && !isFiltered;
 
-  const commitHashes = new Set(state.commits.map(c => c.hash));
-  const hashToCommitMap = new Map();
-  const hashToCommitRowMap = new Map();
-  state.commits.forEach((c, index) => {
-    hashToCommitMap.set(c.hash, c);
-    hashToCommitRowMap.set(c.hash, index);
+  const layout = layoutGitGraph(state.commits, [], {
+    shouldDrawToBottom
   });
 
-  interface ActiveTrack {
-    targetHash: string;
-    colorIdx: number;
-    isWorkingTree?: boolean;
-  }
+  state.graphLayout = layout;
+  state.cachedLines = layout.segments;
 
-  let activeTracks: ActiveTrack[] = [];
-  const commitNodes: Record<string, any> = {};
-  const rawLines: any[] = [];
-  let maxLanes = 0;
-  let nextColorIdx = 1;
-
-  // Determine if a commit is main trunk
-  const mainTrunk = new Set<string>();
-  let curr: string | null = null;
-  if (state.commits[0] && state.commits[0].hash === '*working-tree*') {
-    curr = state.commits[0].hash;
-  } else {
-    const headCommit = state.commits.find(c => c.decorations && c.decorations.some(d => d === 'HEAD' || d.startsWith('HEAD ->')));
-    curr = headCommit ? headCommit.hash : (state.commits[0] ? state.commits[0].hash : null);
-  }
-  while (curr) {
-    mainTrunk.add(curr);
-    const c = hashToCommitMap.get(curr);
-    curr = (c && c.parents && c.parents.length > 0) ? c.parents[0] : null;
-  }
-
-  // Branch colors decoration mapping
+  const commitNodesObj: Record<string, GraphNode> = {};
   state.branchColorMap.clear();
 
-  for (let r = 0; r < state.commits.length; r++) {
-    const c = state.commits[r];
-    const hash = c.hash;
-    const parents = c.parents || [];
-    const isMerge = parents.length >= 2;
+  for (const [hash, node] of layout.nodes) {
+    commitNodesObj[hash] = node;
+  }
+  state.cachedCommitNodes = commitNodesObj;
 
-    // 1. Find or assign lane for current commit
-    const matchingIndices: number[] = [];
-    for (let i = 0; i < activeTracks.length; i++) {
-      if (activeTracks[i].targetHash === hash) {
-        matchingIndices.push(i);
-      }
-    }
-
-    let nodeLane: number;
-    let nodeColorIdx: number;
-    if (matchingIndices.length > 0) {
-      nodeLane = matchingIndices[0];
-      nodeColorIdx = activeTracks[nodeLane].colorIdx;
-    } else {
-      // Brand new branch tip (HEAD, main trunk root, or unmerged branch tip)
-      if (mainTrunk.has(hash) && activeTracks.length === 0) {
-        nodeLane = 0;
-        nodeColorIdx = 0;
-      } else {
-        // Standard Git Graph convention: unmerged branches always allocate on the outermost track!
-        nodeLane = activeTracks.length;
-        nodeColorIdx = nextColorIdx++;
-      }
-      activeTracks.push({
-        targetHash: hash,
-        colorIdx: nodeColorIdx,
-        isWorkingTree: (hash === '*working-tree*')
-      });
-    }
-
-    commitNodes[hash] = { row: r, lane: nodeLane, isMerge, colorIdx: nodeColorIdx };
-    maxLanes = Math.max(maxLanes, activeTracks.length, nodeLane + 1);
-
-    // Branch color mapping
-    if (c.decorations && c.decorations.length > 0) {
+  // Branch colors decoration mapping
+  for (const c of state.commits) {
+    const node = commitNodesObj[c.hash];
+    if (node && c.decorations && c.decorations.length > 0) {
       c.decorations.forEach(dec => {
-        state.branchColorMap.set(dec, colors[nodeColorIdx % colors.length]);
+        state.branchColorMap.set(dec, colors[node.colorIdx % colors.length]);
       });
     }
-
-    // 2. Prepare next row tracks and connections
-    const targetNextTracks: (ActiveTrack | null)[] = activeTracks.map(t => ({ ...t }));
-    const mergingTracks: { fromLane: number; toTargetLane: number; colorIdx: number; toHash?: string }[] = [];
-    const branchingLines: { fromLane: number; toTargetLane: number; colorIdx: number; toHash?: string }[] = [];
-
-    // Other tracks matching this commit merge into nodeLane at row r
-    for (let m = 1; m < matchingIndices.length; m++) {
-      const idx = matchingIndices[m];
-      targetNextTracks[idx] = null;
-      mergingTracks.push({
-        fromLane: idx,
-        toTargetLane: nodeLane,
-        colorIdx: activeTracks[idx].colorIdx,
-        toHash: hash
-      });
-    }
-
-    // Process primary parent (parents[0])
-    if (parents.length === 0) {
-      // Root commit reached: branch terminates
-      targetNextTracks[nodeLane] = null;
-    } else {
-      const p0 = parents[0];
-      if (commitHashes.has(p0)) {
-        const existingIdx = targetNextTracks.findIndex((t, idx) => idx !== nodeLane && t !== null && t.targetHash === p0);
-        if (existingIdx !== -1) {
-          if (nodeLane < existingIdx) {
-            // Lower lane continues, higher lane terminates and merges in
-            const higherColor = targetNextTracks[existingIdx]!.colorIdx;
-            targetNextTracks[existingIdx] = null;
-            targetNextTracks[nodeLane]!.targetHash = p0;
-            mergingTracks.push({ fromLane: existingIdx, toTargetLane: nodeLane, colorIdx: higherColor, toHash: p0 });
-          } else {
-            // Current lane is higher: terminates into existing lower lane
-            targetNextTracks[nodeLane] = null;
-            mergingTracks.push({ fromLane: nodeLane, toTargetLane: existingIdx, colorIdx: nodeColorIdx, toHash: p0 });
-          }
-        } else {
-          targetNextTracks[nodeLane]!.targetHash = p0;
-        }
-      } else {
-        // Parent not loaded
-        if (shouldDrawToBottom) {
-          targetNextTracks[nodeLane]!.targetHash = p0;
-        } else {
-          targetNextTracks[nodeLane] = null;
-        }
-      }
-    }
-
-    // Process secondary parents (parents[1..])
-    for (let p = 1; p < parents.length; p++) {
-      const pk = parents[p];
-      const existingIdx = targetNextTracks.findIndex(t => t !== null && t.targetHash === pk);
-      if (existingIdx !== -1) {
-        branchingLines.push({
-          fromLane: nodeLane,
-          toTargetLane: existingIdx,
-          colorIdx: targetNextTracks[existingIdx]!.colorIdx,
-          toHash: pk
-        });
-      } else {
-        if (commitHashes.has(pk) || shouldDrawToBottom) {
-          const newLane = targetNextTracks.length;
-          const newColor = nextColorIdx++;
-          targetNextTracks.push({
-            targetHash: pk,
-            colorIdx: newColor,
-            isWorkingTree: (hash === '*working-tree*')
-          });
-          branchingLines.push({
-            fromLane: nodeLane,
-            toTargetLane: newLane,
-            colorIdx: newColor,
-            toHash: pk
-          });
-        }
-      }
-    }
-
-    // 3. Lane Compaction (Inward shift when lanes terminate)
-    const nextTracks: ActiveTrack[] = [];
-    const laneMap = new Map<number, number>();
-    for (let i = 0; i < targetNextTracks.length; i++) {
-      const tr = targetNextTracks[i];
-      if (tr !== null && tr.targetHash !== '') {
-        const newL = nextTracks.length;
-        nextTracks.push(tr);
-        laneMap.set(i, newL);
-      }
-    }
-
-    // Generate transition lines between row r and row r + 1
-    if (r < state.commits.length - 1) {
-      // Surviving tracks
-      for (let i = 0; i < activeTracks.length; i++) {
-        if (laneMap.has(i)) {
-          const toL = laneMap.get(i)!;
-          rawLines.push({
-            fromRow: r,
-            fromLane: i,
-            toRow: r + 1,
-            toLane: toL,
-            runningLane: toL,
-            colorIdx: activeTracks[i].colorIdx,
-            toHash: activeTracks[i].targetHash,
-            isWorkingTreeLine: !!activeTracks[i].isWorkingTree
-          });
-        }
-      }
-      // Merging tracks (inward merge curves)
-      for (const mt of mergingTracks) {
-        const toL = laneMap.has(mt.toTargetLane) ? laneMap.get(mt.toTargetLane)! : mt.toTargetLane;
-        rawLines.push({
-          fromRow: r,
-          fromLane: mt.fromLane,
-          toRow: r + 1,
-          toLane: toL,
-          runningLane: toL,
-          colorIdx: mt.colorIdx,
-          toHash: mt.toHash,
-          isMergeLine: true
-        });
-      }
-      // Branching lines (outward fork curves)
-      for (const bl of branchingLines) {
-        const toL = laneMap.has(bl.toTargetLane) ? laneMap.get(bl.toTargetLane)! : bl.toTargetLane;
-        rawLines.push({
-          fromRow: r,
-          fromLane: bl.fromLane,
-          toRow: r + 1,
-          toLane: toL,
-          runningLane: toL,
-          colorIdx: bl.colorIdx,
-          toHash: bl.toHash,
-          isMergeLine: true
-        });
-      }
-    } else if (shouldDrawToBottom) {
-      // Last row: draw tracks to bottom
-      for (let i = 0; i < activeTracks.length; i++) {
-        rawLines.push({
-          fromRow: r,
-          fromLane: i,
-          toRow: state.commits.length - 0.5,
-          toLane: i,
-          runningLane: i,
-          colorIdx: activeTracks[i].colorIdx,
-          toHash: activeTracks[i].targetHash,
-          isWorkingTreeLine: !!activeTracks[i].isWorkingTree
-        });
-      }
-    }
-
-    activeTracks = nextTracks;
-    maxLanes = Math.max(maxLanes, activeTracks.length);
   }
 
-  // 4. Consolidate straight vertical lines to optimize SVG rendering
-  const lines = consolidateLines(rawLines);
-
-  state.cachedLines = lines;
-  state.cachedCommitNodes = commitNodes;
-
-  // Build commit → branch name mapping using DAG topological propagation & merge message parsing
-  state.commitBranchLabel = inferCommitBranches(
-    state.commits,
-    commitNodes,
-    lines,
-    hashToCommitMap,
-    mainTrunk,
-    state.remoteBranches
-  );
-
-  // Calculate max lane for each row
-  const rowMaxLanes = new Array(state.commits.length).fill(0);
-  for (const hash in commitNodes) {
-    const node = commitNodes[hash];
-    if (node.row < state.commits.length) {
-      rowMaxLanes[node.row] = Math.max(rowMaxLanes[node.row], node.lane);
-    }
-  }
-  for (const line of lines) {
-    const startRow = Math.max(0, Math.min(Math.floor(line.fromRow), Math.floor(line.toRow)));
-    const endRow = Math.min(state.commits.length - 1, Math.max(Math.ceil(line.fromRow), Math.ceil(line.toRow)));
-    for (let r = startRow; r <= endRow; r++) {
-      rowMaxLanes[r] = Math.max(rowMaxLanes[r], line.fromLane, line.toLane, line.runningLane || 0);
-    }
-  }
+  // VS Code-style: show only real Git decorations/refs.
+  state.commitBranchLabel = {};
 
   // Save row max lanes to window object
   if (typeof window !== 'undefined') {
-    window.rowMaxLanes = rowMaxLanes;
+    window.rowMaxLanes = layout.rowMaxLanes;
   }
 
   // Dynamic graph width
-  const computedGraphWidth = paddingLeft + (maxLanes + 1) * laneWidth;
+  const computedGraphWidth = layout.width;
   state.currentGraphWidth = computedGraphWidth;
 
   if (typeof document !== 'undefined') {
