@@ -188,6 +188,8 @@ export class BlameAnnotationsManager implements vscode.Disposable {
 
       const lines = output.split('\n');
       const commitMap = new Map<string, { author: string; email: string; time: number; summary: string }>();
+      // Label and hover depend only on the commit, so build them once per commit rather than once per line
+      const renderCache = new Map<string, { label: string; hover: vscode.MarkdownString }>();
       const decorations: vscode.DecorationOptions[] = [];
       const documentLineCount = document.lineCount;
       const commitStatsMap = new Map<string, { hash: string; lines: number; author: string; summary: string }>();
@@ -249,45 +251,49 @@ export class BlameAnnotationsManager implements vscode.Disposable {
         const lineIndex = finalLineNum - 1;
 
         if (lineIndex >= 0 && lineIndex < documentLineCount) {
-          let dateStr = '----/--/--';
-          if (!hash.startsWith('00000000') && meta.time) {
-            const date = new Date(meta.time * 1000);
-            const y = date.getFullYear();
-            const m = String(date.getMonth() + 1).padStart(2, '0');
-            const d = String(date.getDate()).padStart(2, '0');
-            dateStr = `${y}/${m}/${d}`;
-          }
+          const isUncommitted = hash.startsWith('00000000');
+          const authorName = isUncommitted ? '未提交' : meta.author;
 
-          const authorName = hash.startsWith('00000000') ? '未提交' : meta.author;
-          
           this.lineHashMapping[lineIndex] = hash;
           if (!commitStatsMap.has(hash)) {
             commitStatsMap.set(hash, { hash, lines: 0, author: authorName, summary: meta.summary });
           }
           commitStatsMap.get(hash)!.lines += 1;
-          
-          const formattedLabel = formatBlameLabel(dateStr, authorName);
 
-          const hoverMarkdown = new vscode.MarkdownString();
-          hoverMarkdown.isTrusted = true;
-          if (hash.startsWith('00000000')) {
-            hoverMarkdown.appendMarkdown(`### 未提交的更改\n\n当前行包含本地未提交的修改。`);
-          } else {
-            hoverMarkdown.appendMarkdown(`### Git 提交信息\n\n`);
-            hoverMarkdown.appendMarkdown(`- **提交哈希**: \`${hash}\`\n`);
-            hoverMarkdown.appendMarkdown(`- **作者**: ${meta.author} \`${meta.email}\`\n`);
-            hoverMarkdown.appendMarkdown(`- **提交日期**: ${new Date(meta.time * 1000).toLocaleString()}\n`);
-            hoverMarkdown.appendMarkdown(`- **提交信息**: ${meta.summary}\n`);
+          let rendered = renderCache.get(hash);
+          if (!rendered) {
+            let dateStr = '----/--/--';
+            if (!isUncommitted && meta.time) {
+              const date = new Date(meta.time * 1000);
+              const y = date.getFullYear();
+              const m = String(date.getMonth() + 1).padStart(2, '0');
+              const d = String(date.getDate()).padStart(2, '0');
+              dateStr = `${y}/${m}/${d}`;
+            }
+
+            const hoverMarkdown = new vscode.MarkdownString();
+            hoverMarkdown.isTrusted = true;
+            if (isUncommitted) {
+              hoverMarkdown.appendMarkdown(`### 未提交的更改\n\n当前行包含本地未提交的修改。`);
+            } else {
+              hoverMarkdown.appendMarkdown(`### Git 提交信息\n\n`);
+              hoverMarkdown.appendMarkdown(`- **提交哈希**: \`${hash}\`\n`);
+              hoverMarkdown.appendMarkdown(`- **作者**: ${meta.author} \`${meta.email}\`\n`);
+              hoverMarkdown.appendMarkdown(`- **提交日期**: ${new Date(meta.time * 1000).toLocaleString()}\n`);
+              hoverMarkdown.appendMarkdown(`- **提交信息**: ${meta.summary}\n`);
+            }
+            rendered = { label: formatBlameLabel(dateStr, authorName), hover: hoverMarkdown };
+            renderCache.set(hash, rendered);
           }
 
           decorations.push({
             range: new vscode.Range(lineIndex, 0, lineIndex, 0),
             renderOptions: {
               before: {
-                contentText: formattedLabel
+                contentText: rendered.label
               }
             },
-            hoverMessage: hoverMarkdown
+            hoverMessage: rendered.hover
           });
         }
 

@@ -2723,6 +2723,24 @@ svg#graph-svg .merge-inner.hovered {
   word-break: break-word;
 }
 
+.history-card-body {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.history-card-body.expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
 /* ══════════════════════════════════════════════════
    SVG GRAPH — PATH BASE STYLES
    ══════════════════════════════════════════════════ */
@@ -2825,6 +2843,12 @@ svg#graph-svg .merge-inner.hovered {
 
 .commit-hover-popover .commit-info-card {
   margin-top: 0;
+}
+
+.commit-hover-popover .detail-author-name,
+.commit-hover-popover .detail-author-date,
+.commit-hover-popover .detail-hash-copyable {
+  user-select: text;
 }
 
 .commit-hover-stats {

@@ -95,16 +95,30 @@ export function buildFileHeaderData(
   };
 }
 
+interface FileHeaderResult {
+  headerData: FileHeaderData | undefined;
+  isNewFile: boolean;
+}
+
 export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
   private _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
   public readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
   private repoManager: RepoManager;
+  /**
+   * Results per file path. Git only sees the file on disk, so unsaved edits cannot change them;
+   * VS Code re-requests CodeLens on every edit, and this keeps typing from spawning git processes.
+   * Cleared by refresh() on save and on Git state changes.
+   */
+  private _results = new Map<string, FileHeaderResult>();
+  private _generation = 0;
 
   constructor(repoManager: RepoManager) {
     this.repoManager = repoManager;
   }
 
   public refresh(): void {
+    this._results.clear();
+    this._generation++;
     this._onDidChangeCodeLenses.fire();
   }
 
@@ -132,6 +146,45 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
       return [];
     }
 
+    let result = this._results.get(filePath);
+    if (!result) {
+      const generation = this._generation;
+      result = await this._computeHeader(gitRoot, filePath, token);
+      if (!result) {
+        return [];
+      }
+      // A refresh during the git calls means the result may already be stale
+      if (generation === this._generation) {
+        this._results.set(filePath, result);
+      }
+    }
+
+    const { headerData, isNewFile } = result;
+    if (!headerData) {
+      return [];
+    }
+
+    const range = new vscode.Range(0, 0, 0, 0);
+    return [
+      new vscode.CodeLens(range, {
+        title: `${headerData.displayAuthor}, ${headerData.displayTime}`,
+        command: 'git-visual.openFileRecentDiff',
+        arguments: [filePath, headerData.diffKind, headerData.commitHash, isNewFile]
+      }),
+      new vscode.CodeLens(range, {
+        title: `${headerData.authorCount} 作者${headerData.youSuffix}`,
+        command: 'git-visual.showLineBlame',
+        arguments: [isNewFile]
+      })
+    ];
+  }
+
+  /** Runs the git queries for one file; undefined when cancelled or failed (nothing to cache). */
+  private async _computeHeader(
+    gitRoot: string,
+    filePath: string,
+    token: vscode.CancellationToken
+  ): Promise<FileHeaderResult | undefined> {
     const repoFilePath = path.relative(gitRoot, filePath).replace(/\\/g, '/');
 
     // 把 VSCode 的 CancellationToken 桥接到 AbortController，
@@ -150,7 +203,7 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
       ]);
 
       if (token.isCancellationRequested) {
-        return [];
+        return undefined;
       }
 
       let isNewFile = false;
@@ -180,36 +233,16 @@ export class FileHeaderCodeLensProvider implements vscode.CodeLensProvider {
         nowSeconds
       );
 
-      if (!headerData) {
-        return [];
+      if (token.isCancellationRequested) {
+        return undefined;
       }
-
-      const range = new vscode.Range(0, 0, 0, 0);
-      const lenses: vscode.CodeLens[] = [];
-
-      lenses.push(
-        new vscode.CodeLens(range, {
-          title: `${headerData.displayAuthor}, ${headerData.displayTime}`,
-          command: 'git-visual.openFileRecentDiff',
-          arguments: [filePath, headerData.diffKind, headerData.commitHash, isNewFile]
-        })
-      );
-
-      lenses.push(
-        new vscode.CodeLens(range, {
-          title: `${headerData.authorCount} 作者${headerData.youSuffix}`,
-          command: 'git-visual.showLineBlame',
-          arguments: [isNewFile]
-        })
-      );
-
-      return lenses;
+      return { headerData, isNewFile };
     } catch (err) {
       // 取消时不打印噪音日志
       if (!token.isCancellationRequested) {
         console.error('[Git Look] File header CodeLens error:', err);
       }
-      return [];
+      return undefined;
     } finally {
       disposable.dispose();
     }

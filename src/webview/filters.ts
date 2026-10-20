@@ -157,7 +157,7 @@ export function initFilters(onFilterChange: () => void) {
     onFilterChange();
   });
 
-  // 从远程拉取所有分支并刷新：按钮点击时加 .fetching 进入旋转态，
+  // 获取远程更新并刷新（不修改本地分支和工作区）：按钮点击时加 .fetching 进入旋转态，
   // 等 host 端 fetchRemoteDone 消息回来再清除（见 messageHandler）
   if (elements.fetchBtn) {
     elements.fetchBtn.addEventListener('click', () => {

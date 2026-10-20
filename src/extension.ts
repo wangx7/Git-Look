@@ -95,6 +95,7 @@ export async function activate(context: vscode.ExtensionContext) {
           author: c.author,
           timestamp: c.timestamp,
           message: c.message,
+          body: c.body,
           lineRange: c.lineRange,
           oldFilePath: c.oldFilePath,
           newFilePath: c.newFilePath
@@ -108,6 +109,7 @@ export async function activate(context: vscode.ExtensionContext) {
             author: '工作区未提交更改',
             timestamp: Math.floor(Date.now() / 1000),
             message: '未提交的修改',
+            body: '',
             lineRange: {
               oldStart: startLine,
               oldLength: endLine - startLine + 1,
@@ -191,6 +193,7 @@ export async function activate(context: vscode.ExtensionContext) {
           author: c.author,
           timestamp: c.timestamp,
           message: c.message,
+          body: c.body,
           oldFilePath: c.oldFilePath,
           newFilePath: c.newFilePath
         }));
@@ -203,6 +206,7 @@ export async function activate(context: vscode.ExtensionContext) {
             author: '工作区未提交更改',
             timestamp: Math.floor(Date.now() / 1000),
             message: '未提交的修改',
+            body: '',
             oldFilePath: repoFilePath,
             newFilePath: repoFilePath
           });
@@ -257,8 +261,10 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }
   });
+  // CodeLens data comes from git, which only sees saved files, so unsaved edits never change it.
+  // Refresh on Git state changes instead (commit, checkout, pull...) to pick up history changes.
   context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument(() => {
+    repoManager.onDidChangeGitState(() => {
       if (fileHeaderChangeDebounce) {
         clearTimeout(fileHeaderChangeDebounce);
       }

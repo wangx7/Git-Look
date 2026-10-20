@@ -7,6 +7,7 @@ let hoverTimer: any = null;
 let popoverHideTimer: any = null;
 let currentHoverHash: string | null = null;
 let popoverPointerInside = false;
+let popoverSelecting = false;
 let currentAnchorX = 0;
 let currentAnchorY = 0;
 let currentTooltipFiles: any[] | null = null;
@@ -30,6 +31,10 @@ function getOrCreatePopover(): HTMLElement {
         popoverPointerInside = false;
         schedulePopoverHide();
       });
+      // Keep the popover open while the user drags to select text, even if the pointer leaves it.
+      popoverEl.addEventListener('mousedown', () => {
+        popoverSelecting = true;
+      });
     }
     document.body.appendChild(popoverEl);
   }
@@ -42,16 +47,30 @@ export function _resetPopoverForTest(): void {
   popoverHideTimer = null;
   currentHoverHash = null;
   popoverPointerInside = false;
+  popoverSelecting = false;
   currentAnchorX = 0;
   currentAnchorY = 0;
   currentTooltipFiles = null;
+}
+
+function hasPopoverSelection(): boolean {
+  if (!popoverEl || typeof window.getSelection !== 'function') return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.anchorNode) return false;
+  return popoverEl.contains(selection.anchorNode);
+}
+
+// The popover stays pinned while text inside it is being selected or remains selected,
+// so the user can copy it; a click elsewhere clears the selection and dismisses it.
+function isPopoverPinned(): boolean {
+  return !!popoverEl?.classList.contains('visible') && (popoverSelecting || hasPopoverSelection());
 }
 
 function schedulePopoverHide(): void {
   if (popoverHideTimer) clearTimeout(popoverHideTimer);
   popoverHideTimer = setTimeout(() => {
     popoverHideTimer = null;
-    if (!popoverPointerInside) hideCommitTooltip();
+    if (!popoverPointerInside && !isPopoverPinned()) hideCommitTooltip();
   }, POPOVER_HIDE_DELAY_MS);
 }
 
@@ -65,6 +84,7 @@ export function hideCommitTooltip(): void {
     popoverHideTimer = null;
   }
   currentHoverHash = null;
+  popoverSelecting = false;
   if (popoverEl) {
     popoverEl.classList.remove('visible');
   }
@@ -135,8 +155,12 @@ function renderTooltipStats(files: any[] | null): void {
   positionPopover(currentAnchorX, currentAnchorY);
 }
 
-export function renderCommitTooltipFiles(hash: string, files: any[]): void {
+export function renderCommitTooltipFiles(hash: string, files: any[], body = ''): void {
   if (currentHoverHash !== hash) return;
+  const messageEl = popoverEl?.querySelector('.commit-info-message');
+  if (body && messageEl && !messageEl.querySelector('.detail-msg-body')) {
+    messageEl.insertAdjacentHTML('beforeend', `<div class="detail-msg-body">${escapeHtml(body)}</div>`);
+  }
   renderTooltipStats(files);
 }
 
@@ -151,10 +175,6 @@ export function showCommitTooltip(commit: any, anchorX: number, anchorY: number)
   const dateStr = formatDate(commit.timestamp);
   const relTime = getRelativeTime(commit.timestamp);
   const badgesHtml = (commit.decorations || []).map((d: string) => makeBadgeHtml(d)).join('');
-  const message = commit.message || '';
-  const firstLineEnd = message.indexOf('\n');
-  const subject = firstLineEnd === -1 ? message : message.substring(0, firstLineEnd);
-  const body = firstLineEnd === -1 ? '' : message.substring(firstLineEnd + 1).trim();
 
   popover.innerHTML = `
     <div class="commit-info-card">
@@ -173,8 +193,7 @@ export function showCommitTooltip(commit: any, anchorX: number, anchorY: number)
       </div>
       ${badgesHtml ? `<div class="detail-branches-container">${badgesHtml}</div>` : ''}
       <div class="commit-info-message">
-        <div class="detail-msg-subject">${escapeHtml(subject)}</div>
-        ${body ? `<div class="detail-msg-body">${escapeHtml(body)}</div>` : ''}
+        <div class="detail-msg-subject">${escapeHtml(commit.message || '')}</div>
       </div>
     </div>
     <div class="commit-hover-stats">加载变更统计...</div>
@@ -187,6 +206,8 @@ export function showCommitTooltip(commit: any, anchorX: number, anchorY: number)
 
 export function initCommitTooltip(tbody: HTMLElement, container: HTMLElement): void {
   tbody.addEventListener('mousemove', (e: MouseEvent) => {
+    if (isPopoverPinned()) return;
+
     const row = (e.target as HTMLElement).closest('.commit-row') as HTMLElement;
     if (!row) {
       hideCommitTooltip();
@@ -226,7 +247,16 @@ export function initCommitTooltip(tbody: HTMLElement, container: HTMLElement): v
     hideCommitTooltip();
   }, { passive: true });
 
-  document.addEventListener('click', () => {
+  document.addEventListener('mouseup', () => {
+    if (!popoverSelecting) return;
+    popoverSelecting = false;
+    if (!popoverPointerInside) schedulePopoverHide();
+  });
+
+  document.addEventListener('click', (e: MouseEvent) => {
+    // Ignore clicks inside the popover and the click that ends a text selection drag.
+    if (popoverEl && e.target instanceof Node && popoverEl.contains(e.target)) return;
+    if (hasPopoverSelection()) return;
     hideCommitTooltip();
   });
 }

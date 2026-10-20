@@ -20,7 +20,8 @@ export interface CommitDiff {
   author: string;
   email: string;
   timestamp: number;
-  message: string;
+  message: string; // subject line
+  body: string;
   diffLines: DiffLine[];
   lineRange?: {
     oldStart: number;

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCommits, getCommitsUntil, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory, getWorkingTreeStatus, getWorktrees, WorktreeInfo } from '../gitHelper';
+import { getCommits, getCommitsUntil, getCommitBody, getBranches, getAuthors, execGit, getCodeStats, clearGitCache, shouldSkipWatchRefresh, hasFileLocalModifications, traceFileHistory, getWorkingTreeStatus, getWorktrees, WorktreeInfo, getRefsFingerprint, CommitInfo } from '../gitHelper';
 import { RepoManager } from '../repoManager';
 import { handleOpenDiff, handleOpenSingleDiff, handleOpenFileHistoryDiff, handleOpenAllDiffs } from './diffHelper';
 
@@ -9,6 +9,12 @@ export interface IBlameManager {
   highlightCommitLines(editor: vscode.TextEditor, hash: string, color: string): void;
   clearHighlight(editor: vscode.TextEditor): void;
   turnOff(): void;
+}
+
+interface RefMeta {
+  branches: string[];
+  remoteBranches: string[];
+  authors: string[];
 }
 
 export class GitGraphProvider implements vscode.WebviewViewProvider {
@@ -29,6 +35,16 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
   private _isWebviewReady = false;
   private _needsRefreshOnVisible = false;
   private _messageQueue: any[] = [];
+  /**
+   * Ref-derived data reused across refreshes while the repo's refs are unchanged,
+   * so saving a file or staging changes doesn't re-run `git shortlog` / `git log` over the whole history.
+   */
+  private _refCache?: {
+    gitRoot: string;
+    fingerprint: string;
+    meta: RefMeta;
+    firstPages: Map<string, CommitInfo[]>;
+  };
 
   private _postMessage(message: any) {
     if (this._view && this._isWebviewReady) {
@@ -259,24 +275,44 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     try {
       const pageSize = 150;
       const skip = page * pageSize;
+      const filters = data.filters || {};
 
-      const [branches, remoteBranches, authors, commits, worktrees] = await Promise.all([
-        getBranches(gitRoot),
-        execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out =>
-          out.split('\n').map(b => b.trim()).filter(Boolean)
-        ).catch(() => []),
-        getAuthors(gitRoot, signal),
-        getCommits(gitRoot, data.filters || {}, skip, pageSize, signal),
+      // Later pages only append commits; branches, authors and worktrees were sent with page 0
+      if (page > 0) {
+        const commits = await getCommits(gitRoot, filters, skip, pageSize, signal);
+        if (signal.aborted) {
+          return;
+        }
+        webview.postMessage({ type: 'dataLoaded', commits, page });
+        return;
+      }
+
+      const fingerprint = await getRefsFingerprint(gitRoot, signal).catch((e: any) => {
+        if (e.message === 'ABORTED') { throw e; }
+        return undefined;
+      });
+      const filtersKey = JSON.stringify(filters);
+      const cachedFirstPage = this._getRefCache(gitRoot, fingerprint)?.firstPages.get(filtersKey);
+
+      const [meta, commits, worktrees] = await Promise.all([
+        this._getRefMeta(gitRoot, fingerprint, signal),
+        cachedFirstPage
+          ? Promise.resolve(cachedFirstPage.slice())
+          : getCommits(gitRoot, filters, skip, pageSize, signal),
         getWorktrees(gitRoot, signal)
       ]);
 
       if (signal.aborted) {
         return;
       }
+      // getCommits returns [] on errors, so an empty page is not worth caching
+      if (!cachedFirstPage && commits.length > 0) {
+        this._getRefCache(gitRoot, fingerprint)?.firstPages.set(filtersKey, commits.slice());
+      }
+      const { branches, remoteBranches, authors } = meta;
 
       // Inject working tree virtual node on page 0 if not filtered out and working tree has modifications
-      if (page === 0) {
-        const filters = data.filters || {};
+      {
         const hasStrictFilter = !!(filters.author || filters.since || filters.until || filters.query);
         if (!hasStrictFilter) {
           try {
@@ -325,6 +361,30 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private _getRefCache(gitRoot: string, fingerprint: string | undefined) {
+    const cache = this._refCache;
+    return fingerprint && cache && cache.gitRoot === gitRoot && cache.fingerprint === fingerprint ? cache : undefined;
+  }
+
+  private async _getRefMeta(gitRoot: string, fingerprint: string | undefined, signal?: AbortSignal): Promise<RefMeta> {
+    const cached = this._getRefCache(gitRoot, fingerprint);
+    if (cached) {
+      return cached.meta;
+    }
+    const [branches, remoteBranches, authors] = await Promise.all([
+      getBranches(gitRoot),
+      execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot, signal).then(out =>
+        out.split('\n').map(b => b.trim()).filter(Boolean)
+      ).catch(() => []),
+      getAuthors(gitRoot, signal)
+    ]);
+    const meta = { branches, remoteBranches, authors };
+    if (fingerprint && !signal?.aborted) {
+      this._refCache = { gitRoot, fingerprint, meta, firstPages: new Map() };
+    }
+    return meta;
+  }
+
   private async _handleFetchRemote(gitRoot: string, webview: vscode.Webview): Promise<void> {
     try {
       const refFmt = ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/remotes/'];
@@ -366,13 +426,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
       }
 
       if (result.found) {
-        const [branches, remoteBranches, authors] = await Promise.all([
-          getBranches(gitRoot),
-          execGit(['branch', '-r', '--format=%(refname:short)'], gitRoot).then(out =>
-            out.split('\n').map(b => b.trim()).filter(Boolean)
-          ).catch(() => []),
-          getAuthors(gitRoot)
-        ]);
+        const fingerprint = await getRefsFingerprint(gitRoot).catch(() => undefined);
+        const { branches, remoteBranches, authors } = await this._getRefMeta(gitRoot, fingerprint);
 
         webview.postMessage({
           type: 'commitLocated',
@@ -419,9 +474,10 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      const [statusOut, numstatOut] = await Promise.all([
+      const [statusOut, numstatOut, body] = await Promise.all([
         execGit(['diff-tree', '--no-commit-id', '--name-status', '-r', '-m', '--root', hash], gitRoot),
-        execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', hash], gitRoot)
+        execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', '-m', '--root', hash], gitRoot),
+        getCommitBody(gitRoot, hash)
       ]);
 
       const fileStatusMap = new Map<string, string>();
@@ -451,7 +507,8 @@ export class GitGraphProvider implements vscode.WebviewViewProvider {
       webview.postMessage({
         type: 'commitDetail',
         hash,
-        files: Array.from(filesMap.values())
+        files: Array.from(filesMap.values()),
+        body
       });
     } catch (err: any) {
       webview.postMessage({

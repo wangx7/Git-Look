@@ -1,5 +1,6 @@
 import * as cp from 'child_process';
 import * as vscode from 'vscode';
+import { StringDecoder } from 'string_decoder';
 import { LRUCache } from '../utils/lruCache';
 
 let gitPathCache: string | undefined = undefined;
@@ -189,7 +190,8 @@ export async function execGitStream(
   args: string[],
   cwd: string,
   onLine: (line: string) => void | boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  input?: string
 ): Promise<void> {
   const git = await getGitPath();
   const fullArgs = ['-c', 'core.quotepath=false', ...args];
@@ -200,7 +202,14 @@ export async function execGitStream(
     }
 
     const child = cp.spawn(git, fullArgs, { cwd });
+    if (input !== undefined && child.stdin) {
+      // git may exit before consuming all input (e.g. on error); the close handler reports that
+      child.stdin.on('error', () => { /* ignore EPIPE */ });
+      child.stdin.end(input);
+    }
 
+    // Decoder keeps multi-byte UTF-8 characters intact when they straddle chunk boundaries
+    const decoder = new StringDecoder('utf8');
     let stderr = '';
     let buffer = '';
     let isTerminated = false;
@@ -217,11 +226,12 @@ export async function execGitStream(
 
     child.stdout.on('data', (chunk: Buffer) => {
       if (isTerminated) return;
-      buffer += chunk.toString('utf8');
+      buffer += decoder.write(chunk);
+      let start = 0;
       let idx: number;
-      while ((idx = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.substring(0, idx);
-        buffer = buffer.substring(idx + 1);
+      while ((idx = buffer.indexOf('\n', start)) !== -1) {
+        const line = buffer.substring(start, idx);
+        start = idx + 1;
         const shouldStop = onLine(line);
         if (shouldStop === false) {
           isTerminated = true;
@@ -231,6 +241,7 @@ export async function execGitStream(
           return;
         }
       }
+      buffer = buffer.substring(start);
     });
 
     child.stderr.on('data', (chunk: Buffer) => {
@@ -246,6 +257,7 @@ export async function execGitStream(
       if (signal) signal.removeEventListener('abort', onAbort);
       if (isTerminated) return;
       if (code === 0) {
+        buffer += decoder.end();
         if (buffer.length > 0) {
           onLine(buffer);
         }

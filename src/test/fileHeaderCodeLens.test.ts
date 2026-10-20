@@ -203,6 +203,31 @@ describe('fileHeaderCodeLens', () => {
       expect(lenses[1].command.arguments).toEqual([true]);
     });
 
+    it('should reuse results for repeated requests until refresh()', async () => {
+      (gitHelper.hasFileLocalModifications as jest.Mock).mockResolvedValue(false);
+      (gitHelper.isFileTracked as jest.Mock).mockResolvedValue(true);
+      (gitHelper.getFileLastCommit as jest.Mock).mockResolvedValue({
+        hash: 'abc1234', author: 'a', email: 'a@example.com', timestamp: 1624543200, message: 'msg'
+      });
+      (gitHelper.getFileAuthors as jest.Mock).mockResolvedValue([{ name: 'a', email: 'a@example.com' }]);
+      (gitHelper.getCurrentGitUser as jest.Mock).mockResolvedValue({ name: 'a', email: 'a@example.com' });
+
+      const provider = new FileHeaderCodeLensProvider(createMockRepoManager());
+      const document = {
+        isUntitled: false,
+        uri: { scheme: 'file', fsPath: path.join('/mock/git/root', 'src', 'file.ts') }
+      } as any;
+
+      const first = await provider.provideCodeLenses(document, createMockToken());
+      const second = await provider.provideCodeLenses(document, createMockToken());
+      expect(second).toEqual(first);
+      expect(gitHelper.getFileAuthors).toHaveBeenCalledTimes(1);
+
+      provider.refresh();
+      await provider.provideCodeLenses(document, createMockToken());
+      expect(gitHelper.getFileAuthors).toHaveBeenCalledTimes(2);
+    });
+
     it('should return empty array when showFileHeaderCodeLens configuration is false', async () => {
       (vscode.workspace.getConfiguration as jest.Mock).mockReturnValue({
         get: jest.fn((key, def) => key === 'showFileHeaderCodeLens' ? false : def)

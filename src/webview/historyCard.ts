@@ -26,9 +26,19 @@ export function createHistoryCard(commit: any): HTMLDivElement {
           <span class="history-card-date">${relTime}</span>
         </div>
         <div class="history-card-msg">${escapeHtml(commit.message)}</div>
+        ${commit.body ? `<div class="history-card-body">${escapeHtml(commit.body)}</div>` : ''}
       </div>
     </div>
   `;
+
+  // Long bodies are clamped; clicking a clamped body toggles it instead of opening the diff.
+  const bodyEl = card.querySelector('.history-card-body') as HTMLElement | null;
+  bodyEl?.addEventListener('click', (e) => {
+    const expanded = bodyEl.classList.contains('expanded');
+    if (!expanded && bodyEl.scrollHeight <= bodyEl.clientHeight) return;
+    e.stopPropagation();
+    bodyEl.classList.toggle('expanded');
+  });
 
   return card;
 }

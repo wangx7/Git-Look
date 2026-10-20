@@ -20,6 +20,19 @@ export async function getGitRoot(cwd: string): Promise<string | null> {
   }
 }
 
+/**
+ * Identifies the current state of every ref and of HEAD (including which branch is checked out).
+ * Anything derived purely from refs — commit lists, branches, authors — stays valid while it is unchanged.
+ */
+export async function getRefsFingerprint(cwd: string, signal?: AbortSignal): Promise<string> {
+  const [refs, head] = await Promise.all([
+    execGit(['for-each-ref', '--format=%(objectname) %(refname) %(HEAD)'], cwd, signal),
+    // Fails in a repo without commits yet; for-each-ref alone is enough then
+    execGit(['rev-parse', 'HEAD'], cwd, signal).catch(() => '')
+  ]);
+  return head.trim() + '\n' + refs;
+}
+
 export async function getBranches(cwd: string): Promise<string[]> {
   try {
     const output = await execGit(['branch', '-a', '--format=%(refname:short)'], cwd);

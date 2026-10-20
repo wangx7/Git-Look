@@ -1,6 +1,39 @@
 import * as path from 'path';
 import { execGit } from './exec';
 import { CommitDiff, GitUser, FileLastCommit, FileAuthor } from './types';
+import { splitMessage } from './message';
+
+// The message (%B) may span several lines, so it is terminated by NUL, which git never allows inside a commit message.
+const HISTORY_PRETTY_FORMAT = '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%B%x00';
+
+/**
+ * Splits `git log` output produced with HISTORY_PRETTY_FORMAT into commits plus the
+ * lines git printed after each message (diff hunks for -L, name-status for --follow).
+ */
+function parseHistoryRecords(output: string): { commit: CommitDiff; lines: string[] }[] {
+  return output.split(/^COMMIT_START_LOOK\x1f/m).slice(1).map(record => {
+    const nul = record.indexOf('\x00');
+    const headerEnd = nul === -1 ? record.length : nul;
+    const parts = record.substring(0, headerEnd).split('\x1f');
+    const parents = (parts[1] || '').split(' ').filter(p => p.trim().length > 0);
+    const { subject, body } = splitMessage(parts.slice(5).join('\x1f'));
+
+    return {
+      commit: {
+        hash: parts[0],
+        parentHash: parents[0] || 'empty',
+        parents,
+        author: parts[2],
+        email: parts[3],
+        timestamp: parseInt(parts[4], 10),
+        message: subject,
+        body,
+        diffLines: []
+      },
+      lines: record.substring(headerEnd + 1).split('\n')
+    };
+  });
+}
 
 export async function traceLineHistory(
   cwd: string,
@@ -82,60 +115,28 @@ export async function traceLineHistory(
     `-L`,
     `${mappedStart},${mappedEnd}:${repoFilePath}`,
     '--date=raw',
-    '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s'
+    HISTORY_PRETTY_FORMAT
   );
 
   try {
     const output = await execGit(args, gitRoot, signal);
-    const lines = output.split('\n');
-    const commits: CommitDiff[] = [];
-    let currentCommit: CommitDiff | null = null;
-
-    let seenDiffHeader = false;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.startsWith('COMMIT_START_LOOK\x1f')) {
-        if (currentCommit) {
-          commits.push(currentCommit);
-        }
-        seenDiffHeader = false;
-        const parts = line.substring('COMMIT_START_LOOK\x1f'.length).split('\x1f');
-        const hash = parts[0];
-        const parentsStr = parts[1] || '';
-        const author = parts[2];
-        const email = parts[3];
-        const timestamp = parseInt(parts[4], 10);
-        const message = parts.slice(5).join('\x1f');
-
-        const parents = parentsStr.split(' ').filter(p => p.trim().length > 0);
-        const parentHash = parents[0] || 'empty';
-
-        currentCommit = {
-          hash,
-          parentHash,
-          parents,
-          author,
-          email,
-          timestamp,
-          message,
-          diffLines: []
-        };
-      } else if (currentCommit) {
+    const commits = parseHistoryRecords(output).map(({ commit, lines }) => {
+      let seenDiffHeader = false;
+      for (const line of lines) {
         // Track when we enter the diff section (skip diff metadata headers)
         if (line.startsWith('diff --git')) {
           seenDiffHeader = true;
           const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
           if (match) {
-            currentCommit.oldFilePath = match[1];
-            currentCommit.newFilePath = match[2];
+            commit.oldFilePath = match[1];
+            commit.newFilePath = match[2];
           }
           continue;
         }
         if (line.startsWith('@@ ')) {
           const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
           if (match) {
-            currentCommit.lineRange = {
+            commit.lineRange = {
               oldStart: parseInt(match[1], 10),
               oldLength: match[2] !== undefined ? parseInt(match[2], 10) : 1,
               newStart: parseInt(match[3], 10),
@@ -163,21 +164,18 @@ export async function traceLineHistory(
         }
 
         if (line.startsWith('-')) {
-          currentCommit.diffLines.push({ type: 'deleted', text: line.substring(1) });
+          commit.diffLines.push({ type: 'deleted', text: line.substring(1) });
         } else if (line.startsWith('+')) {
-          currentCommit.diffLines.push({ type: 'added', text: line.substring(1) });
+          commit.diffLines.push({ type: 'added', text: line.substring(1) });
         } else if (line.startsWith(' ') || line === '') {
-          currentCommit.diffLines.push({
+          commit.diffLines.push({
             type: 'context',
             text: line.length > 0 ? line.substring(1) : ''
           });
         }
       }
-    }
-
-    if (currentCommit) {
-      commits.push(currentCommit);
-    }
+      return commit;
+    });
 
     // Resolve correct parent hash for merge commits asynchronously
     for (const commit of commits) {
@@ -251,7 +249,7 @@ export async function traceFileHistory(
     '--follow',
     '--name-status',
     '--date=raw',
-    '--pretty=format:COMMIT_START_LOOK%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s'
+    HISTORY_PRETTY_FORMAT
   ];
   if (startRef) {
     args.push(startRef);
@@ -260,40 +258,14 @@ export async function traceFileHistory(
 
   try {
     const output = await execGit(args, gitRoot, signal);
-    const lines = output.split('\n');
-    const commits: CommitDiff[] = [];
-    let currentCommit: CommitDiff | null = null;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.startsWith('COMMIT_START_LOOK\x1f')) {
-        if (currentCommit) {
-          commits.push(currentCommit);
+    return parseHistoryRecords(output).map(({ commit, lines }) => {
+      commit.oldFilePath = repoFilePath;
+      commit.newFilePath = repoFilePath;
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          continue;
         }
-        const parts = line.substring('COMMIT_START_LOOK\x1f'.length).split('\x1f');
-        const hash = parts[0];
-        const parentsStr = parts[1] || '';
-        const author = parts[2];
-        const email = parts[3];
-        const timestamp = parseInt(parts[4], 10);
-        const message = parts.slice(5).join('\x1f');
-
-        const parents = parentsStr.split(' ').filter(p => p.trim().length > 0);
-        const parentHash = parents[0] || 'empty';
-
-        currentCommit = {
-          hash,
-          parentHash,
-          parents,
-          author,
-          email,
-          timestamp,
-          message,
-          diffLines: [],
-          oldFilePath: repoFilePath,
-          newFilePath: repoFilePath
-        };
-      } else if (currentCommit && line) {
         // Parse the status line
         // Typically it is "M\tfilepath" or "R100\toldpath\tnewpath" or "A\tfilepath"
         const parts = line.split('\t');
@@ -301,20 +273,16 @@ export async function traceFileHistory(
           const status = parts[0];
           if (status.startsWith('R')) {
             // Rename: R100 \t oldpath \t newpath
-            currentCommit.oldFilePath = parts[1];
-            currentCommit.newFilePath = parts[2];
+            commit.oldFilePath = parts[1];
+            commit.newFilePath = parts[2];
           } else {
-            currentCommit.oldFilePath = parts[1];
-            currentCommit.newFilePath = parts[1];
+            commit.oldFilePath = parts[1];
+            commit.newFilePath = parts[1];
           }
         }
       }
-    }
-
-    if (currentCommit) {
-      commits.push(currentCommit);
-    }
-    return commits;
+      return commit;
+    });
   } catch (err) {
     console.error('Error tracing file history:', err);
     return [];

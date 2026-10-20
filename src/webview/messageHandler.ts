@@ -91,19 +91,22 @@ export function initMessageHandler() {
           state.hasMoreCommits = newCommits.length === state.pageSize;
         }
   
-        state.branches = message.branches;
-        state.remoteBranches = message.remoteBranches || [];
-        state.authors = message.authors;
-        state.worktrees = message.worktrees || [];
-  
-        updateFilterControls();
+        // Later pages carry only commits; refs, authors and worktrees come with page 0
+        if (page === 0) {
+          state.branches = message.branches;
+          state.remoteBranches = message.remoteBranches || [];
+          state.authors = message.authors;
+          state.worktrees = message.worktrees || [];
+          updateFilterControls();
+        }
+
         renderTableAndGraph();
         saveCurrentState();
         break;
       }
       case 'commitDetail':
-        renderCommitTooltipFiles(message.hash, message.files);
-        renderCommitDetail(message.hash, message.files);
+        renderCommitTooltipFiles(message.hash, message.files, message.body);
+        renderCommitDetail(message.hash, message.files, message.body);
         break;
       case 'showHistory':
         hideLoading();

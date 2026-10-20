@@ -3,6 +3,8 @@ import {
   isGitRepository,
   getBranches,
   traceFileHistory,
+  traceLineHistory,
+  getCommitBody,
   hasFileLocalModifications,
   getCurrentGitUser,
   getFileLastCommit,
@@ -18,7 +20,8 @@ import {
   getWorkingTreeStatus,
   getWorktrees,
   execGit,
-  execGitStream
+  execGitStream,
+  clearStatsCache
 } from '../gitHelper';
 import * as cp from 'child_process';
 import * as vscode from 'vscode';
@@ -45,9 +48,9 @@ describe('gitHelper', () => {
   });
 
   it('should trace file history with rename support', async () => {
-    const mockOutput = `COMMIT_START_LOOK\x1fhash1\x1fparent1\x1fAuthor Name\x1fauthor@example.com\x1f1624543200\x1fTest Commit Message\n` +
+    const mockOutput = `COMMIT_START_LOOK\x1fhash1\x1fparent1\x1fAuthor Name\x1fauthor@example.com\x1f1624543200\x1fTest Commit Message\n\x00\n` +
       `M\tsrc/webview/selectionHistory.ts\n` +
-      `COMMIT_START_LOOK\x1fhash2\x1fparent2\x1fAuthor Name\x1fauthor@example.com\x1f1624540000\x1fRenamed file\n` +
+      `COMMIT_START_LOOK\x1fhash2\x1fparent2\x1fAuthor Name\x1fauthor@example.com\x1f1624540000\x1fRenamed file\n\x00\n` +
       `R100\tsrc/webview/oldSelectionHistory.ts\tsrc/webview/selectionHistory.ts\n`;
     
     (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
@@ -63,6 +66,55 @@ describe('gitHelper', () => {
     expect(commits[1].hash).toBe('hash2');
     expect(commits[1].oldFilePath).toBe('src/webview/oldSelectionHistory.ts');
     expect(commits[1].newFilePath).toBe('src/webview/selectionHistory.ts');
+  });
+
+  it('should keep multi-line messages (including CRLF and look-alike lines) in file history', async () => {
+    const mockOutput = `COMMIT_START_LOOK\x1fhash1\x1fparent1\x1fAuthor\x1fa@example.com\x1f1624543200\x1fFix bug\r\n\r\n  - detail one\r\nM\tnot/a/status/line.ts\r\n\x00\n` +
+      `M\tsrc/file.ts\n` +
+      `COMMIT_START_LOOK\x1fhash2\x1fparent2\x1fAuthor\x1fa@example.com\x1f1624540000\x1fOne liner\n\x00\n` +
+      `A\tsrc/file.ts\n`;
+    (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+      cb(null, args.includes('rev-parse') ? '/mock/path\n' : mockOutput, '');
+    });
+
+    const commits = await traceFileHistory('/mock/path', '/mock/path/src/file.ts');
+    expect(commits.length).toBe(2);
+    expect(commits[0].message).toBe('Fix bug');
+    expect(commits[0].body).toBe('  - detail one\nM\tnot/a/status/line.ts');
+    expect(commits[0].newFilePath).toBe('src/file.ts');
+    expect(commits[1].message).toBe('One liner');
+    expect(commits[1].body).toBe('');
+  });
+
+  it('should keep multi-line messages in line history without mixing them into the diff', async () => {
+    const logOutput = `COMMIT_START_LOOK\x1fhash1\x1fparent1\x1fAuthor\x1fa@example.com\x1f1624543200\x1fsubject line\n\n+ body that looks like an added line\n\x00\n` +
+      `diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,1 +1,2 @@\n a\n+b\n`;
+    (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+      if (args.includes('rev-parse')) {
+        cb(null, '/mock/path\n', '');
+      } else if (args.includes('-L')) {
+        cb(null, logOutput, '');
+      } else {
+        cb(null, '', '');
+      }
+    });
+
+    const commits = await traceLineHistory('/mock/path', '/mock/path/f.txt', 1, 2);
+    expect(commits.length).toBe(1);
+    expect(commits[0].message).toBe('subject line');
+    expect(commits[0].body).toBe('+ body that looks like an added line');
+    expect(commits[0].diffLines).toEqual([
+      { type: 'context', text: 'a' },
+      { type: 'added', text: 'b' },
+      { type: 'context', text: '' }
+    ]);
+  });
+
+  it('should fetch a commit body on demand with normalized line endings', async () => {
+    (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+      cb(null, 'line 1\r\nline 2\r\n\n', '');
+    });
+    expect(await getCommitBody('/mock/path', 'abc1234')).toBe('line 1\nline 2');
   });
 
   it('should check if file has local modifications', async () => {
@@ -298,24 +350,56 @@ describe('gitHelper', () => {
       return Math.floor(d.getTime() / 1000);
     }
 
+    /**
+     * Mocks the two git calls getCodeStats makes: the commit listing (execFile)
+     * and the per-commit numstat stream for uncached hashes (spawn).
+     */
+    function mockStatsGit(commits: { hash: string; author: string; email: string; ts: number; numstat: string }[]) {
+      const listing = commits.map(c => [c.hash, c.author, c.email, c.ts].join('\x1f')).join('\n');
+      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
+        if (args.includes('log')) { cb(null, listing, ''); }
+        else { cb(null, '', ''); }
+      });
+      const { EventEmitter } = require('events');
+      const spawnCalls: string[] = [];
+      (cp.spawn as any).mockImplementation(() => {
+        const child: any = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = jest.fn();
+        child.stdin = {
+          on: jest.fn(),
+          end: (input: string) => {
+            spawnCalls.push(input);
+            const requested = new Set(input.split('\n').filter(Boolean));
+            const out = commits
+              .filter(c => requested.has(c.hash))
+              .map(c => `COMMIT_STAT|${c.hash}\n${c.numstat}`)
+              .join('\n');
+            setImmediate(() => {
+              child.stdout.emit('data', Buffer.from(out));
+              child.emit('close', 0);
+            });
+          }
+        };
+        return child;
+      });
+      return spawnCalls;
+    }
+
+    beforeEach(() => {
+      clearStatsCache();
+    });
+
     it('should return 24-bucket hourlyActivity when sinceDate === untilDate', async () => {
       const date = '2026-07-04';
       const ts9  = makeTs(date, 9);
       const ts14 = makeTs(date, 14);
-      const mockOutput = [
-        `COMMIT_STAT|aaa|wangx|wangx@test.com|${ts9}`,
-        '2\t1\tsrc/file.ts',
-        `COMMIT_STAT|bbb|jiapengyan|jp@test.com|${ts9}`,
-        '1\t0\tsrc/file.ts',
-        `COMMIT_STAT|ccc|wangx|wangx@test.com|${ts14}`,
-        '3\t2\tsrc/other.ts',
-      ].join('\n');
-
-      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (args.includes('log')) { cb(null, mockOutput, ''); }
-        else if (args.includes('rev-parse')) { cb(null, '/usr/bin/git\n', ''); }
-        else { cb(null, '', ''); }
-      });
+      mockStatsGit([
+        { hash: 'aaa', author: 'wangx', email: 'wangx@test.com', ts: ts9, numstat: '2\t1\tsrc/file.ts' },
+        { hash: 'bbb', author: 'jiapengyan', email: 'jp@test.com', ts: ts9, numstat: '1\t0\tsrc/file.ts' },
+        { hash: 'ccc', author: 'wangx', email: 'wangx@test.com', ts: ts14, numstat: '3\t2\tsrc/other.ts' },
+      ]);
 
       const stats = await getCodeStats('/mock/path', { since: date, until: date });
 
@@ -335,18 +419,10 @@ describe('gitHelper', () => {
     });
 
     it('should return hourlyActivity as null when sinceDate !== untilDate', async () => {
-      const mockOutput = [
-        `COMMIT_STAT|aaa|wangx|wangx@test.com|${makeTs('2026-07-01', 10)}`,
-        '1\t0\tsrc/a.ts',
-        `COMMIT_STAT|bbb|wangx|wangx@test.com|${makeTs('2026-07-02', 11)}`,
-        '1\t0\tsrc/b.ts',
-      ].join('\n');
-
-      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (args.includes('log')) { cb(null, mockOutput, ''); }
-        else if (args.includes('rev-parse')) { cb(null, '/usr/bin/git\n', ''); }
-        else { cb(null, '', ''); }
-      });
+      mockStatsGit([
+        { hash: 'aaa', author: 'wangx', email: 'wangx@test.com', ts: makeTs('2026-07-01', 10), numstat: '1\t0\tsrc/a.ts' },
+        { hash: 'bbb', author: 'wangx', email: 'wangx@test.com', ts: makeTs('2026-07-02', 11), numstat: '1\t0\tsrc/b.ts' },
+      ]);
 
       const stats = await getCodeStats('/mock/path', { since: '2026-07-01', until: '2026-07-02' });
 
@@ -357,17 +433,41 @@ describe('gitHelper', () => {
     it('should return all-zero hourly buckets when no commits on that day', async () => {
       const date = '2026-07-04';
 
-      (cp.execFile as any).mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-        if (args.includes('log')) { cb(null, '', ''); }
-        else if (args.includes('rev-parse')) { cb(null, '/usr/bin/git\n', ''); }
-        else { cb(null, '', ''); }
-      });
+      const spawnCalls = mockStatsGit([]);
 
       const stats = await getCodeStats('/mock/path', { since: date, until: date });
 
       expect(stats.hourlyActivity).not.toBeNull();
       expect(stats.hourlyActivity!.length).toBe(24);
       expect(stats.hourlyActivity!.every(h => h.count === 0)).toBe(true);
+      expect(spawnCalls).toHaveLength(0);
+    });
+
+    it('should aggregate numstat and only fetch diffs for uncached commits on later calls', async () => {
+      const ts = makeTs('2026-07-01', 10);
+      const spawnCalls = mockStatsGit([
+        { hash: 'aaa', author: 'wangx', email: 'wangx@test.com', ts, numstat: '2\t1\tsrc/a.ts\n-\t-\timg.png' },
+        { hash: 'bbb', author: 'other', email: 'o@test.com', ts, numstat: '5\t0\tsrc/a.ts' },
+      ]);
+
+      const first = await getCodeStats('/mock/path', { since: '2026-07-01', until: '2026-07-02' });
+      expect(first.totalAdditions).toBe(7);
+      expect(first.totalDeletions).toBe(1);
+      expect(first.topFiles[0]).toEqual({ path: 'src/a.ts', changes: 2 });
+      expect(spawnCalls).toEqual(['aaa\nbbb\n']);
+
+      // A new commit appears (a refresh clears the git output cache): only it should be diffed
+      clearGitCache();
+      const spawnCalls2 = mockStatsGit([
+        { hash: 'ccc', author: 'wangx', email: 'wangx@test.com', ts, numstat: '1\t1\tsrc/b.ts' },
+        { hash: 'aaa', author: 'wangx', email: 'wangx@test.com', ts, numstat: 'SHOULD-NOT-BE-READ' },
+        { hash: 'bbb', author: 'other', email: 'o@test.com', ts, numstat: 'SHOULD-NOT-BE-READ' },
+      ]);
+      const second = await getCodeStats('/mock/path', { since: '2026-07-01', until: '2026-07-02' });
+      expect(spawnCalls2).toEqual(['ccc\n']);
+      expect(second.totalCommits).toBe(3);
+      expect(second.totalAdditions).toBe(8);
+      expect(second.contributors.find(c => c.author === 'wangx')!.additions).toBe(3);
     });
   });
 

@@ -15,6 +15,7 @@ import { renderDetailBadges } from './badgeRenderer';
 let requestVirtualListUpdate: (() => void) | null = null;
 let currentCommitHash: string = '';
 let currentCommitFiles: any[] = [];
+let currentCommitBody = '';
 
 export function onRequestVirtualListUpdate(callback: () => void) {
   requestVirtualListUpdate = callback;
@@ -23,7 +24,18 @@ export function onRequestVirtualListUpdate(callback: () => void) {
 export function refreshCommitDetailView(hash: string): void {
   if (state.selectedCommitHash !== hash || currentCommitHash !== hash) return;
   saveCurrentState();
-  renderCommitDetail(hash, currentCommitFiles);
+  renderCommitDetail(hash, currentCommitFiles, currentCommitBody);
+}
+
+// The body is not part of the graph list data; it arrives with the commitDetail response.
+function renderDetailBody(body: string) {
+  if (!elements.detailMsgBody) return;
+  if (body) {
+    elements.detailMsgBody.textContent = body;
+    elements.detailMsgBody.classList.remove('hidden');
+  } else {
+    elements.detailMsgBody.classList.add('hidden');
+  }
 }
 
 const rowHeight = constants.rowHeight;
@@ -92,26 +104,10 @@ export function handleRowClick(row, hash, parents) {
     });
   };
 
-  const msg = commit.message || '';
-  const firstLineEnd = msg.indexOf('\n');
-  let subject = msg;
-  let body = '';
-  if (firstLineEnd !== -1) {
-    subject = msg.substring(0, firstLineEnd);
-    body = msg.substring(firstLineEnd + 1).trim();
-  }
-
   if (elements.detailMsgSubject) {
-    elements.detailMsgSubject.textContent = subject;
+    elements.detailMsgSubject.textContent = commit.message || '';
   }
-  if (elements.detailMsgBody) {
-    if (body) {
-      elements.detailMsgBody.textContent = body;
-      elements.detailMsgBody.classList.remove('hidden');
-    } else {
-      elements.detailMsgBody.classList.add('hidden');
-    }
-  }
+  renderDetailBody(currentCommitHash === hash ? currentCommitBody : '');
 
   elements.detailStatsRow.innerHTML = '';
 
@@ -153,11 +149,13 @@ export function collapseDetail() {
   selectCircleInGraph(null);
 }
 
-export function renderCommitDetail(hash, files) {
+export function renderCommitDetail(hash, files, body = '') {
   if (state.selectedCommitHash !== hash) return;
 
   currentCommitHash = hash;
   currentCommitFiles = files;
+  currentCommitBody = body;
+  renderDetailBody(body);
 
   if (window.pendingFileLoadTimeout) {
     clearTimeout(window.pendingFileLoadTimeout);

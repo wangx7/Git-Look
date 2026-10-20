@@ -28,6 +28,7 @@ export class RepoManager implements vscode.Disposable {
   private readonly _onDidChangeSelection = new vscode.EventEmitter<void>();
   private readonly _onDidChangeGitState = new vscode.EventEmitter<string>();
   private _repoStateListeners: Map<string, vscode.Disposable> = new Map();
+  private _realRoots = new Map<string, string>();
 
   /** Fired when the repo list changes (repos added/removed/discovered). */
   public readonly onDidChangeRepos = this._onDidChangeRepos.event;
@@ -81,6 +82,7 @@ export class RepoManager implements vscode.Disposable {
   private async _refresh(): Promise<void> {
     const oldRoots = this._repos.map(r => r.root);
     this._repos = [];
+    this._realRoots.clear();
 
     // Source 1: vscode.git extension API (most reliable, already gives root)
     if (this._gitApi?.repositories) {
@@ -211,8 +213,7 @@ export class RepoManager implements vscode.Disposable {
 
     let bestRoot: string | undefined;
     for (const repo of this._repos) {
-      let repoRoot = repo.root;
-      try { repoRoot = fs.realpathSync(repoRoot); } catch { /* ignore */ }
+      const repoRoot = this._realRoot(repo.root);
 
       const rel = path.relative(repoRoot, filePath);
       if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
@@ -222,6 +223,20 @@ export class RepoManager implements vscode.Disposable {
       }
     }
     return bestRoot;
+  }
+
+  /**
+   * Symlink-resolved repo root. Repo roots rarely change, and getRepoForFile runs on every
+   * editor switch and CodeLens request, so avoid repeating this synchronous filesystem call.
+   */
+  private _realRoot(root: string): string {
+    let real = this._realRoots.get(root);
+    if (real === undefined) {
+      real = root;
+      try { real = fs.realpathSync(root); } catch { /* ignore */ }
+      this._realRoots.set(root, real);
+    }
+    return real;
   }
 
   dispose(): void {

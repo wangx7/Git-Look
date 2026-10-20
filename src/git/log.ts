@@ -1,5 +1,6 @@
 import { execGit } from './exec';
 import { CommitInfo, GitFilters } from './types';
+import { normalizeMessage } from './message';
 
 export function buildLogArgs(filters: GitFilters): { args: string[]; searchHash: string | null } {
   const args = ['log', '--topo-order'];
@@ -139,6 +140,15 @@ export async function getCommitsUntil(
   }
 }
 
+/**
+ * The graph list only carries each commit's subject (%s); the body is fetched on demand
+ * when a commit's detail or tooltip is shown.
+ */
+export async function getCommitBody(cwd: string, hash: string, signal?: AbortSignal): Promise<string> {
+  const output = await execGit(['show', '-s', '--pretty=format:%b', hash], cwd, signal);
+  return normalizeMessage(output);
+}
+
 export function parseCommitLine(line: string): CommitInfo | null {
   if (!line.trim()) {
     return null;
@@ -153,7 +163,7 @@ export function parseCommitLine(line: string): CommitInfo | null {
   const email = parts[3];
   const timestamp = parseInt(parts[4], 10);
   const decPart = parts[5].trim();
-  const message = parts.slice(6).join('\x1f');
+  const message = parts.slice(6).join('\x1f').trimEnd();
 
   // Parse decorations (e.g. "(HEAD -> master, origin/master, tag: v1.0.0)")
   const decorations: string[] = [];
